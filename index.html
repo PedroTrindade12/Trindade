@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+<title>Trindade</title>
+<meta name="theme-color" content="#020617" />
+<meta name="description" content="Saude, tarefas, financas, estudo, trabalho, casal e pets" />
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="mobile-web-app-capable" content="yes" />
+<link rel="icon" href="icon-192.png" />
+<style>
+  @import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap");
+  html, body { margin:0; padding:0; background:#020617; }
+  #root { min-height:100vh; }
+</style>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+<script src="https://unpkg.com/recharts@2/umd/Recharts.js"></script>
+<script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  // shim: emula a API window.storage usada no artifact do Claude, gravando
+  // no Firebase Realtime Database (no "trindade") -- sincroniza entre os
+  // celulares do Pedro e da Mariana.
+  const FIREBASE_URL = "https://apps-5716a-default-rtdb.firebaseio.com";
+  const sanitize = (k) => k.replace(/[.#$\[\]:]/g, "_");
+
+  window.storage = {
+    get: async (key, shared) => {
+      const safeKey = sanitize(key);
+      const res = await fetch(FIREBASE_URL + "/trindade/" + safeKey + ".json");
+      if (!res.ok) throw new Error("Falha ao ler do Firebase");
+      const val = await res.json();
+      if (val === null || val === undefined) return null;
+      return { key, value: val, shared: !!shared };
+    },
+    set: async (key, value, shared) => {
+      const safeKey = sanitize(key);
+      try {
+        const res = await fetch(FIREBASE_URL + "/trindade/" + safeKey + ".json", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(value),
+        });
+        if (!res.ok) return null;
+        return { key, value, shared: !!shared };
+      } catch (e) { return null; }
+    },
+    delete: async (key, shared) => {
+      const safeKey = sanitize(key);
+      await fetch(FIREBASE_URL + "/trindade/" + safeKey + ".json", { method: "DELETE" });
+      return { key, deleted: true, shared: !!shared };
+    },
+    list: async (prefix, shared) => {
+      const res = await fetch(FIREBASE_URL + "/trindade.json?shallow=true");
+      const val = (await res.json()) || {};
+      const keys = Object.keys(val).filter((k) => !prefix || k.startsWith(sanitize(prefix)));
+      return { keys, prefix, shared: !!shared };
+    },
+  };
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useRef } = React;
+const { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid, BarChart, Bar } = Recharts;
+
+/* ---------------- ícones (emoji, sem dependência externa) ---------------- */
+function makeIcon(char) {
+  return function Icon({ size = 16, className = "" }) {
+    return <span className={className} style={{ fontSize: size, lineHeight: 1, display: "inline-block" }}>{char}</span>;
+  };
+}
+const Ic = {
+  Drop: makeIcon("💧"), Dumbbell: makeIcon("🏋️"), Chart: makeIcon("📈"), Food: makeIcon("🍽️"),
+  Scale: makeIcon("⚖️"), Camera: makeIcon("📷"), Plus: makeIcon("➕"), Trash: makeIcon("🗑️"),
+  Left: makeIcon("‹"), Right: makeIcon("›"), Target: makeIcon("🎯"), Gear: makeIcon("⚙️"),
+  Flame: makeIcon("🔥"), Warn: makeIcon("⚠️"), Sync: makeIcon("🔄"), Health: makeIcon("🩺"),
+  Check: makeIcon("✅"), Money: makeIcon("💰"), Study: makeIcon("📚"), Work: makeIcon("💼"),
+  Heart: makeIcon("💞"), Pet: makeIcon("🐾"), Bell: makeIcon("🔔"), Edit: makeIcon("✏️"),
+  Calendar: makeIcon("🗓️"),
+};
+
+/* ---------------- utilitários gerais ---------------- */
+const iso = (d) => { const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000); return t.toISOString().slice(0, 10); };
+const hoje = () => iso(new Date());
+const addDays = (s, n) => { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + n); return iso(d); };
+const curto = (s) => { const [, m, d] = s.split("-"); return `${d}/${m}`; };
+const longo = (s) => { const [y, m, d] = s.split("-"); return `${d}/${m}/${y}`; };
+const n = (v) => parseFloat(v) || 0;
+const uid = () => Math.random().toString(36).slice(2, 10);
+const fmt = (v) => (v || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+const fmtCompact = (v) => { v = v || 0; return Math.abs(v) >= 1000 ? (v / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k" : v.toLocaleString("pt-BR", { maximumFractionDigits: 0 }); };
+const horaAgora = () => new Date().getHours();
+const mesAtual = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+const mesLabel = (key) => { const [y, m] = key.split("-").map(Number); const names = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"]; return `${names[m-1]}/${y}`; };
+
+const THEMES = {
+  pedro: { label: "Pedro", accent: "#22d3ee", accentSoft: "rgba(34,211,238,0.15)" },
+  mariana: { label: "Mariana", accent: "#e879f9", accentSoft: "rgba(232,121,249,0.15)" },
+};
+/* ================= SAÚDE: fitness diário ================= */
+const MUSC = { leve: 3.5, moderado: 5.0, intenso: 6.0 };
+const AERO = { caminhada: 3.5, "caminhada rápida": 4.3, bicicleta: 7.0, elíptico: 5.0, "corrida leve": 8.3, corrida: 10.0, natação: 7.0, "esteira inclinada": 6.0 };
+const ALONG_MET = 2.3;
+const LIMITE_GORD = 35;
+const KCAL_KG = 7700;
+const NEAT = [
+  { v: 1.2, l: "Sedentário" }, { v: 1.3, l: "Leve" }, { v: 1.375, l: "Moderado" }, { v: 1.5, l: "Ativo" },
+];
+const burn = (met, min, kg) => (min > 0 && kg > 0 ? Math.round(((met - 1) * 3.5 * kg / 200) * min) : 0);
+const tmbDe = (kg, alt, idade, sexo) => Math.round(10 * kg + 6.25 * alt - 5 * idade + (sexo === "m" ? 5 : -161));
+
+function novoDiaSaude() { return { agua: 0, musc: 0, muscInt: "moderado", aero: 0, aeroTipo: "caminhada", along: 0, comidas: [], peso: "", gord: "", massa: "" }; }
+function novoPerfilSaude(sexo, kcalMin) { return { sexo, idade: "", altura: "", pesoInicial: "", meta: "", neat: 1.375, metaAgua: "", metaProt: "", kcalMin, dias: {} }; }
+
+function Card({ children, className = "" }) { return <div className={`bg-slate-900 rounded-2xl p-4 border border-slate-800 ${className}`}>{children}</div>; }
+function Titulo({ icon: Icon, children, accent, extra }) {
+  return (
+    <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center gap-2"><Icon size={17} />{ }<h3 className="font-semibold text-sm" style={{color:"#e2e8f0"}}>{children}</h3></div>
+      {extra}
+    </div>
+  );
+}
+const Num = (p) => <input type="number" inputMode="decimal" {...p} className={`bg-slate-800 rounded-lg px-3 py-2 text-sm w-full outline-none focus:ring-1 focus:ring-slate-600 ${p.className || ""}`} />;
+function Aviso({ children }) { return <p className="mt-2 text-[11px] text-amber-400 flex gap-1.5"><Ic.Warn size={13} className="shrink-0 mt-0.5" /><span>{children}</span></p>; }
+
+function SaudeHoje({ P, D, setPerfilCampo, setDiaCampo, accent }) {
+  const completo = n(P.idade) > 0 && n(P.altura) > 0 && n(P.pesoInicial) > 0 && n(P.meta) > 0;
+  const pesoAtualAux = n(D.peso) > 0 ? n(D.peso) : n(P.pesoInicial);
+  const calc = (rec, kg) => {
+    const kMusc = burn(MUSC[rec.muscInt] || 5, rec.musc, kg);
+    const kAero = burn(AERO[rec.aeroTipo] || 3.5, rec.aero, kg);
+    const kAlong = burn(ALONG_MET, rec.along, kg);
+    return { kMusc, kAero, kAlong, treino: kMusc + kAero + kAlong };
+  };
+  const tmb = completo && pesoAtualAux ? tmbDe(pesoAtualAux, n(P.altura), n(P.idade), P.sexo) : 0;
+  const t = calc(D, pesoAtualAux);
+  const gastoTotal = tmb ? Math.round(tmb * P.neat) + t.treino : 0;
+  const consumido = D.comidas.reduce((a, c) => a + n(c.kcal), 0);
+  const protTotal = D.comidas.reduce((a, c) => a + n(c.prot), 0);
+  const gordTotal = D.comidas.reduce((a, c) => a + n(c.gord), 0);
+  const saldo = consumido - gastoTotal;
+  const metaAgua = n(P.metaAgua) > 0 ? n(P.metaAgua) : Math.round(pesoAtualAux * 35);
+  const metaProt = n(P.metaProt) > 0 ? n(P.metaProt) : Math.round(pesoAtualAux * 1.8);
+  const kcalMin = n(P.kcalMin);
+  const deficit = saldo < 0;
+  const kgSem = (Math.abs(saldo) * 7) / KCAL_KG;
+  const pctProt = metaProt > 0 ? Math.min(100, Math.round((protTotal / metaProt) * 100)) : 0;
+  const pctGord = consumido > 0 ? Math.round(((gordTotal * 9) / consumido) * 100) : 0;
+  const gordAlta = consumido >= 600 && pctGord > LIMITE_GORD;
+
+  const [nomeC, setNomeC] = useState(""); const [kcalC, setKcalC] = useState(""); const [protC, setProtC] = useState(""); const [gordC, setGordC] = useState("");
+  const addComida = () => {
+    if (!nomeC.trim() || !kcalC) return;
+    setDiaCampo("comidas", [...D.comidas, { nome: nomeC.trim(), kcal: n(kcalC), prot: n(protC), gord: n(gordC) }]);
+    setNomeC(""); setKcalC(""); setProtC(""); setGordC("");
+  };
+
+  return (
+    <div className="space-y-4">
+      {!completo && (
+        <div className="w-full flex items-center gap-2 bg-amber-500/15 border border-amber-500/40 text-amber-300 rounded-2xl p-3 text-sm">
+          <Ic.Warn size={18} className="shrink-0" /><span>Complete o perfil (aba Perfil) pra calcular o gasto calórico.</span>
+        </div>
+      )}
+      <Card>
+        <Titulo icon={Ic.Flame} accent={accent}>Balanço do dia</Titulo>
+        {!completo ? <p className="text-slate-500 text-sm">Preencha o perfil pra ver o gasto calórico.</p> : (
+          <>
+            <div className="grid grid-cols-2 gap-2 text-center mb-3">
+              <div className="bg-slate-800/60 rounded-xl py-2"><div className="text-[11px] text-slate-400">Gasto total</div><div className="font-bold text-lg">{gastoTotal}<span className="text-xs text-slate-500"> kcal</span></div></div>
+              <div className="bg-slate-800/60 rounded-xl py-2"><div className="text-[11px] text-slate-400">Consumido</div><div className="font-bold text-lg">{Math.round(consumido)}<span className="text-xs text-slate-500"> kcal</span></div></div>
+            </div>
+            <div className={`rounded-xl py-3 text-center ${deficit ? "bg-emerald-500/15 border border-emerald-500/30" : "bg-orange-500/15 border border-orange-500/30"}`}>
+              <div className="text-[11px] text-slate-300">{deficit ? "Déficit" : "Superávit"} do dia</div>
+              <div className={`font-bold text-2xl ${deficit ? "text-emerald-400" : "text-orange-400"}`}>{deficit ? "−" : "+"}{Math.abs(Math.round(saldo))} kcal</div>
+              <div className="text-[11px] text-slate-400 mt-0.5">≈ {kgSem.toFixed(2)} kg/semana neste ritmo</div>
+            </div>
+            <div className="mt-3 space-y-2">
+              <div>
+                <div className="flex justify-between text-[11px] mb-1"><span className="text-slate-400">Proteína</span><span className={protTotal >= metaProt ? "text-emerald-400" : "text-slate-300"}>{Math.round(protTotal)} / {metaProt} g</span></div>
+                <div className="h-2 bg-slate-800 rounded-full overflow-hidden"><div className={`h-full ${protTotal >= metaProt ? "bg-emerald-500" : "bg-sky-500"}`} style={{ width: `${pctProt}%` }} /></div>
+              </div>
+              <div>
+                <div className="flex justify-between text-[11px] mb-1"><span className="text-slate-400">Gordura</span><span className={gordAlta ? "text-red-400" : "text-slate-300"}>{Math.round(gordTotal)} g · {pctGord}%</span></div>
+                <div className="h-2 bg-slate-800 rounded-full overflow-hidden"><div className={`h-full ${gordAlta ? "bg-red-500" : "bg-slate-500"}`} style={{ width: `${Math.min(100, pctGord)}%` }} /></div>
+              </div>
+            </div>
+            {consumido > 0 && kcalMin > 0 && consumido < kcalMin && <Aviso>Faltam {Math.round(kcalMin - consumido)} kcal pro mínimo de {kcalMin}.</Aviso>}
+            {gordAlta && <Aviso>Gordura acima de {LIMITE_GORD}% das calorias.</Aviso>}
+          </>
+        )}
+      </Card>
+
+      <Card>
+        <Titulo icon={Ic.Drop} accent={accent} extra={<span className="text-xs text-slate-400">{(D.agua/1000).toFixed(2)} / {(metaAgua/1000).toFixed(2)} L</span>}>Água</Titulo>
+        <div className="h-3 bg-slate-800 rounded-full overflow-hidden mb-3"><div className="h-full transition-all" style={{ width: `${Math.min(100, Math.round((D.agua/metaAgua)*100))||0}%`, background: accent }} /></div>
+        <div className="grid grid-cols-4 gap-2">
+          {[200,300,500].map((ml) => <button key={ml} onClick={() => setDiaCampo("agua", Math.max(0, D.agua+ml))} className="bg-slate-800 rounded-lg py-2 text-xs font-medium active:scale-95">+{ml}</button>)}
+          <button onClick={() => setDiaCampo("agua", Math.max(0, D.agua-200))} className="bg-slate-800/60 text-slate-400 rounded-lg py-2 text-xs active:scale-95">−200</button>
+        </div>
+      </Card>
+
+      <Card>
+        <Titulo icon={Ic.Dumbbell} accent={accent} extra={<span className="text-xs text-slate-400">{t.treino} kcal</span>}>Treino</Titulo>
+        <div className="space-y-3">
+          <BlocoTreino label="Musculação" min={D.musc} onMin={(v)=>setDiaCampo("musc",v)} kcal={t.kMusc} minMeta={50} sel={D.muscInt} onSel={(v)=>setDiaCampo("muscInt",v)} opts={Object.keys(MUSC)} />
+          <BlocoTreino label="Aeróbico" min={D.aero} onMin={(v)=>setDiaCampo("aero",v)} kcal={t.kAero} minMeta={15} sel={D.aeroTipo} onSel={(v)=>setDiaCampo("aeroTipo",v)} opts={Object.keys(AERO)} />
+          <BlocoTreino label="Alongamento" min={D.along} onMin={(v)=>setDiaCampo("along",v)} kcal={t.kAlong} minMeta={20} />
+        </div>
+      </Card>
+
+      <Card>
+        <Titulo icon={Ic.Food} accent={accent} extra={<span className="text-xs text-slate-400">{Math.round(consumido)} kcal</span>}>Comidas</Titulo>
+        {D.comidas.length > 0 && (
+          <div className="space-y-1.5 mb-3">
+            {D.comidas.map((c,i) => (
+              <div key={i} className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2">
+                <div className="flex-1 min-w-0 mr-2"><div className="text-sm truncate">{c.nome}</div><div className="text-[10px] text-slate-500">{Math.round(n(c.prot))}g prot · {Math.round(n(c.gord))}g gord</div></div>
+                <span className="text-slate-300 text-xs mr-2 shrink-0">{Math.round(n(c.kcal))}</span>
+                <button onClick={() => setDiaCampo("comidas", D.comidas.filter((_,j)=>j!==i))} className="text-slate-600 shrink-0"><Ic.Trash size={14}/></button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2 mb-2">
+          <input value={nomeC} onChange={(e)=>setNomeC(e.target.value)} placeholder="Ex.: 2 ovos e 1 pão" className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <button onClick={addComida} className="bg-slate-700 rounded-lg px-3 active:scale-95"><Ic.Plus size={16}/></button>
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <input value={kcalC} onChange={(e)=>setKcalC(e.target.value)} type="number" placeholder="kcal" className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <input value={protC} onChange={(e)=>setProtC(e.target.value)} type="number" placeholder="prot g" className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <input value={gordC} onChange={(e)=>setGordC(e.target.value)} type="number" placeholder="gord g" className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+        </div>
+      </Card>
+
+      <Card>
+        <Titulo icon={Ic.Scale} accent={accent}>Peso e composição</Titulo>
+        <div className="grid grid-cols-3 gap-2">
+          <div><label className="text-[11px] text-slate-500 block mb-1">Peso (kg)</label><Num value={D.peso} onChange={(e)=>setDiaCampo("peso",e.target.value)} placeholder="—" /></div>
+          <div><label className="text-[11px] text-slate-500 block mb-1">Gordura (%)</label><Num value={D.gord} onChange={(e)=>setDiaCampo("gord",e.target.value)} placeholder="—" /></div>
+          <div><label className="text-[11px] text-slate-500 block mb-1">Massa (kg)</label><Num value={D.massa} onChange={(e)=>setDiaCampo("massa",e.target.value)} placeholder="—" /></div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+function BlocoTreino({ label, min, onMin, kcal, minMeta, sel, onSel, opts }) {
+  const ok = min >= minMeta;
+  return (
+    <div className="bg-slate-800/50 rounded-xl p-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-sm font-medium flex items-center gap-1.5">{label}{ok && <span className="text-emerald-400 text-xs">✓</span>}</span>
+        <span className="text-xs text-slate-400">{kcal} kcal · meta {minMeta}min</span>
+      </div>
+      <div className="flex gap-2">
+        <div className="flex items-center gap-1.5">
+          <button onClick={()=>onMin(Math.max(0,min-5))} className="w-8 h-9 bg-slate-700 rounded-lg text-sm active:scale-95">−</button>
+          <div className="w-14 text-center bg-slate-900 rounded-lg py-2 text-sm font-semibold">{min}′</div>
+          <button onClick={()=>onMin(min+5)} className="w-8 h-9 bg-slate-700 rounded-lg text-sm active:scale-95">+</button>
+        </div>
+        {opts && <select value={sel} onChange={(e)=>onSel(e.target.value)} className="flex-1 bg-slate-900 rounded-lg px-2 text-xs outline-none">{opts.map(o=><option key={o} value={o}>{o}</option>)}</select>}
+      </div>
+    </div>
+  );
+}
+function SaudeHistorico({ P, accent }) {
+  const diasOrd = useMemo(() => Object.entries(P.dias || {}).sort((a,b)=>a[0].localeCompare(b[0])), [P.dias]);
+  const pesos = diasOrd.filter(([,r])=>n(r.peso)>0).map(([d,r])=>({d:curto(d), peso:n(r.peso), gordPct:n(r.gord)||null, massa:n(r.massa)||null}));
+  return (
+    <div className="space-y-4">
+      <Card>
+        <Titulo icon={Ic.Scale} accent={accent}>Peso</Titulo>
+        {pesos.length < 2 ? <p className="text-slate-500 text-sm">Registre o peso em pelo menos 2 dias (aba Hoje).</p> : (
+          <div className="h-48 -ml-2"><ResponsiveContainer width="100%" height="100%">
+            <LineChart data={pesos}>
+              <CartesianGrid stroke="#1e293b" vertical={false} />
+              <XAxis dataKey="d" tick={{fontSize:10,fill:"#64748b"}} />
+              <YAxis domain={["dataMin - 1","dataMax + 1"]} tick={{fontSize:10,fill:"#64748b"}} width={35} />
+              <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:12}} />
+              {n(P.meta)>0 && <ReferenceLine y={n(P.meta)} stroke="#10b981" strokeDasharray="4 4" />}
+              <Line type="monotone" dataKey="peso" stroke={accent} strokeWidth={2} dot={{r:3}} />
+            </LineChart>
+          </ResponsiveContainer></div>
+        )}
+      </Card>
+      {pesos.some(p=>p.gordPct||p.massa) && (
+        <Card>
+          <Titulo icon={Ic.Chart} accent={accent}>Composição corporal</Titulo>
+          <div className="h-44 -ml-2"><ResponsiveContainer width="100%" height="100%">
+            <LineChart data={pesos}>
+              <CartesianGrid stroke="#1e293b" vertical={false} />
+              <XAxis dataKey="d" tick={{fontSize:10,fill:"#64748b"}} />
+              <YAxis tick={{fontSize:10,fill:"#64748b"}} width={35} />
+              <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:12}} />
+              <Line type="monotone" dataKey="gordPct" name="Gordura %" stroke="#fb923c" strokeWidth={2} dot={{r:2}} connectNulls />
+              <Line type="monotone" dataKey="massa" name="Massa kg" stroke="#34d399" strokeWidth={2} dot={{r:2}} connectNulls />
+            </LineChart>
+          </ResponsiveContainer></div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+function SaudePerfil({ P, setPerfilCampo, accent }) {
+  return (
+    <div className="space-y-4">
+      <Card>
+        <Titulo icon={Ic.Gear} accent={accent}>Perfil</Titulo>
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div><label className="text-[11px] text-slate-500 block mb-1">Sexo (fórmula TMB)</label>
+              <select value={P.sexo} onChange={(e)=>setPerfilCampo("sexo",e.target.value)} className="bg-slate-800 rounded-lg px-3 py-2 text-sm w-full outline-none">
+                <option value="m">Masculino</option><option value="f">Feminino</option>
+              </select>
+            </div>
+            <div><label className="text-[11px] text-slate-500 block mb-1">Idade</label><Num value={P.idade} onChange={(e)=>setPerfilCampo("idade",e.target.value)} placeholder="anos" /></div>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div><label className="text-[11px] text-slate-500 block mb-1">Altura (cm)</label><Num value={P.altura} onChange={(e)=>setPerfilCampo("altura",e.target.value)} placeholder="—" /></div>
+            <div><label className="text-[11px] text-slate-500 block mb-1">Peso inicial</label><Num value={P.pesoInicial} onChange={(e)=>setPerfilCampo("pesoInicial",e.target.value)} placeholder="kg" /></div>
+            <div><label className="text-[11px] text-slate-500 block mb-1">Meta (kg)</label><Num value={P.meta} onChange={(e)=>setPerfilCampo("meta",e.target.value)} placeholder="kg" /></div>
+          </div>
+          <div>
+            <label className="text-[11px] text-slate-500 block mb-1">Rotina fora do treino</label>
+            <select value={P.neat} onChange={(e)=>setPerfilCampo("neat",parseFloat(e.target.value))} className="bg-slate-800 rounded-lg px-3 py-2 text-sm w-full outline-none">
+              {NEAT.map(x=><option key={x.v} value={x.v}>{x.l}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div><label className="text-[11px] text-slate-500 block mb-1">Mín. kcal/dia</label><Num value={P.kcalMin} onChange={(e)=>setPerfilCampo("kcalMin",e.target.value)} placeholder="1800" /></div>
+            <div><label className="text-[11px] text-slate-500 block mb-1">Meta proteína (g)</label><Num value={P.metaProt} onChange={(e)=>setPerfilCampo("metaProt",e.target.value)} placeholder="—" /></div>
+            <div><label className="text-[11px] text-slate-500 block mb-1">Meta água (ml)</label><Num value={P.metaAgua} onChange={(e)=>setPerfilCampo("metaAgua",e.target.value)} placeholder="—" /></div>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+/* ================= SAÚDE: exames (com leitura de foto via OCR local) ================= */
+function parseRelaxFit(texto) {
+  // Layout esperado: nome da métrica numa linha, e em seguida dois números (antes/depois)
+  // com um delta no meio. Ex.: "Peso(kg)" \n "118.8" \n "2.9" \n "115.9"
+  const linhas = texto.split("\n").map(l=>l.trim()).filter(Boolean);
+  const nums = (s) => (s.match(/-?\d+[.,]?\d*/g) || []).map(x=>parseFloat(x.replace(",",".")));
+  const metricas = ["Peso","IMC","Gordura corporal","Taxa muscular","Músculo Esquelético","Massa Corporal Magra",
+    "Gordura Subcutânea","Gordura Visceral","Massa Muscular","Massa Óssea","Água Corporal","Proteína","TMB",
+    "Idade do corpo","Massa Gorda","Peso da Água","Massa de Proteína"];
+  const achados = [];
+  for (let i=0;i<linhas.length;i++) {
+    const linha = linhas[i];
+    const metrica = metricas.find(m => linha.toLowerCase().startsWith(m.toLowerCase()));
+    if (!metrica) continue;
+    const unidadeMatch = linha.match(/\(([^)]+)\)/);
+    const unidade = unidadeMatch ? unidadeMatch[1] : "";
+    // procura os 2 valores numéricos nas próximas linhas (pulando o delta)
+    const candidatos = [];
+    for (let j=i+1; j<Math.min(i+6, linhas.length) && candidatos.length<3; j++) {
+      const vals = nums(linhas[j]);
+      if (vals.length) candidatos.push(...vals);
+    }
+    if (candidatos.length >= 2) {
+      achados.push({ nome: metrica, unidade, valorAntes: candidatos[0], valorDepois: candidatos[candidatos.length-1] });
+    }
+  }
+  return achados;
+}
+
+function SaudeExames({ exames, setExames, accent }) {
+  const [nome, setNome] = useState(""); const [data, setData] = useState(hoje()); const [valor, setValor] = useState("");
+  const [unidade, setUnidade] = useState(""); const [min, setMin] = useState(""); const [max, setMax] = useState("");
+  const [ocrBusy, setOcrBusy] = useState(false); const [ocrErro, setOcrErro] = useState("");
+  const [revisao, setRevisao] = useState(null); // achados pendentes de confirmação
+  const [dataFoto, setDataFoto] = useState(hoje());
+
+  const add = () => {
+    if (!nome.trim() || !valor) return;
+    setExames([...exames, { id: uid(), nome: nome.trim(), data, valor: n(valor), unidade: unidade.trim(), min: min?n(min):null, max: max?n(max):null }]);
+    setNome(""); setValor(""); setUnidade(""); setMin(""); setMax("");
+  };
+  const remove = (id) => setExames(exames.filter(e=>e.id!==id));
+
+  const foto = async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    setOcrBusy(true); setOcrErro(""); setRevisao(null);
+    try {
+      const { data: { text } } = await Tesseract.recognize(f, "por");
+      const achados = parseRelaxFit(text);
+      if (achados.length === 0) { setOcrErro("Não consegui reconhecer os campos. Lance manualmente ou tente uma foto mais nítida."); }
+      else setRevisao(achados);
+    } catch (err) { console.error(err); setOcrErro("Falha ao processar a imagem."); }
+    setOcrBusy(false); e.target.value = "";
+  };
+
+  const confirmarRevisao = () => {
+    const novos = revisao.map(a => ({ id: uid(), nome: a.nome, data: dataFoto, unidade: a.unidade, valor: a.valorDepois, min: null, max: null }));
+    setExames([...exames, ...novos]);
+    setRevisao(null);
+  };
+
+  const porNome = useMemo(() => {
+    const g = {};
+    exames.forEach(e => { (g[e.nome] = g[e.nome]||[]).push(e); });
+    Object.values(g).forEach(l => l.sort((a,b)=>a.data.localeCompare(b.data)));
+    return g;
+  }, [exames]);
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <Titulo icon={Ic.Camera} accent={accent}>Ler relatório (foto)</Titulo>
+        <label className="flex items-center justify-center gap-2 bg-slate-800/60 border border-dashed border-slate-700 rounded-lg py-3 text-xs text-slate-400 cursor-pointer active:scale-[0.99]">
+          <Ic.Camera size={15}/>{ocrBusy ? "Lendo imagem…" : "Enviar print do relatório (RelaxFit)"}
+          <input type="file" accept="image/*" onChange={foto} className="hidden" disabled={ocrBusy} />
+        </label>
+        {ocrErro && <p className="text-[11px] text-red-400 mt-2">{ocrErro}</p>}
+        {revisao && (
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">Confira os valores lidos (data do exame):</span>
+              <input type="date" value={dataFoto} onChange={(e)=>setDataFoto(e.target.value)} className="bg-slate-800 rounded-lg px-2 py-1 text-xs outline-none" />
+            </div>
+            <div className="max-h-64 overflow-y-auto space-y-1">
+              {revisao.map((r,i) => (
+                <div key={i} className="flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-2">
+                  <span className="text-xs flex-1 truncate">{r.nome} {r.unidade && `(${r.unidade})`}</span>
+                  <input type="number" value={r.valorDepois} onChange={(e)=>{ const v=[...revisao]; v[i]={...v[i], valorDepois:n(e.target.value)}; setRevisao(v); }} className="w-20 bg-slate-900 rounded px-2 py-1 text-xs outline-none" />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={()=>setRevisao(null)} className="flex-1 bg-slate-800 rounded-lg py-2 text-xs">Cancelar</button>
+              <button onClick={confirmarRevisao} className="flex-1 rounded-lg py-2 text-xs font-semibold" style={{background:accent, color:"#020617"}}>Salvar {revisao.length} itens</button>
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <Card>
+        <Titulo icon={Ic.Health} accent={accent}>Lançar manualmente</Titulo>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <input value={nome} onChange={(e)=>setNome(e.target.value)} placeholder="Nome do exame" className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <input type="date" value={data} onChange={(e)=>setData(e.target.value)} className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+        </div>
+        <div className="grid grid-cols-4 gap-2 mb-2">
+          <input value={valor} onChange={(e)=>setValor(e.target.value)} type="number" placeholder="valor" className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none col-span-1" />
+          <input value={unidade} onChange={(e)=>setUnidade(e.target.value)} placeholder="unid." className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none col-span-1" />
+          <input value={min} onChange={(e)=>setMin(e.target.value)} type="number" placeholder="mín. ref." className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none col-span-1" />
+          <input value={max} onChange={(e)=>setMax(e.target.value)} type="number" placeholder="máx. ref." className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none col-span-1" />
+        </div>
+        <button onClick={add} className="w-full rounded-lg py-2 text-sm font-semibold" style={{background:accent, color:"#020617"}}>Adicionar</button>
+        <p className="text-[11px] text-slate-600 mt-2">Mín./máx. são opcionais — se preencher, o valor fica vermelho quando sair da faixa.</p>
+      </Card>
+
+      {Object.entries(porNome).map(([nomeEx, lista]) => {
+        const ultimo = lista[lista.length-1];
+        const fora = (ultimo.min!=null && ultimo.valor<ultimo.min) || (ultimo.max!=null && ultimo.valor>ultimo.max);
+        return (
+          <Card key={nomeEx}>
+            <Titulo icon={Ic.Chart} accent={accent} extra={<span className={`text-xs font-semibold ${fora?"text-red-400":"text-slate-300"}`}>{ultimo.valor} {ultimo.unidade}</span>}>{nomeEx}</Titulo>
+            {lista.length>=2 ? (
+              <div className="h-32 -ml-2"><ResponsiveContainer width="100%" height="100%">
+                <LineChart data={lista.map(l=>({d:curto(l.data), v:l.valor}))}>
+                  <CartesianGrid stroke="#1e293b" vertical={false} />
+                  <XAxis dataKey="d" tick={{fontSize:9,fill:"#64748b"}} />
+                  <YAxis tick={{fontSize:9,fill:"#64748b"}} width={30} domain={["dataMin - 1","dataMax + 1"]} />
+                  <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:11}} />
+                  {ultimo.min!=null && <ReferenceLine y={ultimo.min} stroke="#f87171" strokeDasharray="3 3" />}
+                  {ultimo.max!=null && <ReferenceLine y={ultimo.max} stroke="#f87171" strokeDasharray="3 3" />}
+                  <Line type="monotone" dataKey="v" stroke={fora?"#f87171":accent} strokeWidth={2} dot={{r:3}} />
+                </LineChart>
+              </ResponsiveContainer></div>
+            ) : <p className="text-slate-500 text-xs">Só um registro ainda — adicione mais pra ver o gráfico.</p>}
+            <div className="flex flex-wrap gap-1 mt-2">
+              {lista.map(l => <span key={l.id} className="text-[10px] bg-slate-800 rounded px-2 py-1 flex items-center gap-1">{curto(l.data)}: {l.valor} <button onClick={()=>remove(l.id)} className="text-slate-600">✕</button></span>)}
+            </div>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+/* ================= TAREFAS diárias (genérico, reusado por Tarefas e Estudo) ================= */
+function ChecklistDiario({ bucket, setBucket, accent, corAtraso = true }) {
+  const [novoItem, setNovoItem] = useState(""); const [novaHora, setNovaHora] = useState("");
+  const dia = hoje();
+  const itens = bucket.itens || [];
+  const marcados = (bucket.dias && bucket.dias[dia]) || {};
+
+  const addItem = () => {
+    if (!novoItem.trim()) return;
+    setBucket({ ...bucket, itens: [...itens, { id: uid(), label: novoItem.trim(), hora: novaHora ? n(novaHora) : null }] });
+    setNovoItem(""); setNovaHora("");
+  };
+  const removeItem = (id) => {
+    const { [dia]: _diaAtual, ...restoDias } = bucket.dias || {};
+    setBucket({ ...bucket, itens: itens.filter(i=>i.id!==id) });
+  };
+  const toggle = (id) => {
+    const diaAtual = { ...(bucket.dias?.[dia] || {}), [id]: !marcados[id] };
+    setBucket({ ...bucket, dias: { ...(bucket.dias||{}), [dia]: diaAtual } });
+  };
+
+  const horaAtual = horaAgora();
+  const feitos = itens.filter(i=>marcados[i.id]).length;
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <Titulo icon={Ic.Check} accent={accent} extra={<span className="text-xs text-slate-400">{feitos}/{itens.length} hoje</span>}>Checklist de hoje</Titulo>
+        {itens.length === 0 && <p className="text-slate-500 text-sm mb-2">Nenhum item ainda — adicione abaixo.</p>}
+        <div className="space-y-1.5 mb-3">
+          {itens.map(it => {
+            const feito = !!marcados[it.id];
+            const atrasado = corAtraso && !feito && it.hora!=null && horaAtual >= it.hora;
+            return (
+              <div key={it.id} className={`flex items-center justify-between rounded-lg px-3 py-2.5 ${atrasado ? "bg-red-500/15 border border-red-500/40" : "bg-slate-800/50"}`}>
+                <button onClick={()=>toggle(it.id)} className="flex items-center gap-2.5 flex-1 text-left">
+                  <span className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${feito ? "border-transparent" : "border-slate-600"}`} style={feito?{background:accent}:{}}>
+                    {feito && <span style={{color:"#020617", fontSize:12}}>✓</span>}
+                  </span>
+                  <span className={`text-sm ${feito ? "line-through text-slate-500" : atrasado ? "text-red-300" : "text-slate-200"}`}>{it.label}</span>
+                  {it.hora!=null && <span className="text-[10px] text-slate-500 ml-1">{it.hora}h</span>}
+                </button>
+                <button onClick={()=>removeItem(it.id)} className="text-slate-600 ml-2 shrink-0"><Ic.Trash size={14}/></button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex gap-2">
+          <input value={novoItem} onChange={(e)=>setNovoItem(e.target.value)} placeholder="Novo item" className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          {corAtraso && <input value={novaHora} onChange={(e)=>setNovaHora(e.target.value)} type="number" placeholder="hora" className="w-16 bg-slate-800 rounded-lg px-2 py-2 text-sm outline-none" />}
+          <button onClick={addItem} className="bg-slate-700 rounded-lg px-3 active:scale-95"><Ic.Plus size={16}/></button>
+        </div>
+        {corAtraso && <p className="text-[11px] text-slate-600 mt-2">Hora é opcional — se preencher, o item fica vermelho e entra no alerta quando passar do horário e não estiver feito.</p>}
+      </Card>
+    </div>
+  );
+}
+
+/* ================= CRONOGRAMA de aulas (Estudo) ================= */
+const DIAS_SEMANA = ["Seg","Ter","Qua","Qui","Sex","Sáb","Dom"];
+function Cronograma({ aulas, setAulas, accent }) {
+  const [materia, setMateria] = useState(""); const [dia, setDia] = useState("Seg");
+  const [ini, setIni] = useState(""); const [fim, setFim] = useState(""); const [local, setLocal] = useState("");
+
+  const add = () => {
+    if (!materia.trim() || !ini) return;
+    setAulas([...aulas, { id: uid(), materia: materia.trim(), dia, ini, fim, local: local.trim() }]);
+    setMateria(""); setIni(""); setFim(""); setLocal("");
+  };
+  const remove = (id) => setAulas(aulas.filter(a=>a.id!==id));
+  const porDia = DIAS_SEMANA.map(d => ({ dia: d, lista: aulas.filter(a=>a.dia===d).sort((a,b)=>a.ini.localeCompare(b.ini)) }));
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <Titulo icon={Ic.Calendar} accent={accent}>Nova aula</Titulo>
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <input value={materia} onChange={(e)=>setMateria(e.target.value)} placeholder="Matéria" className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <select value={dia} onChange={(e)=>setDia(e.target.value)} className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none">
+            {DIAS_SEMANA.map(d=><option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+        <div className="grid grid-cols-3 gap-2 mb-2">
+          <input type="time" value={ini} onChange={(e)=>setIni(e.target.value)} className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <input type="time" value={fim} onChange={(e)=>setFim(e.target.value)} className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <input value={local} onChange={(e)=>setLocal(e.target.value)} placeholder="local" className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+        </div>
+        <button onClick={add} className="w-full rounded-lg py-2 text-sm font-semibold" style={{background:accent, color:"#020617"}}>Adicionar aula</button>
+      </Card>
+      {porDia.map(({dia, lista}) => lista.length>0 && (
+        <Card key={dia}>
+          <Titulo icon={Ic.Calendar} accent={accent}>{dia}</Titulo>
+          <div className="space-y-1.5">
+            {lista.map(a => (
+              <div key={a.id} className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2">
+                <div><div className="text-sm">{a.materia}</div><div className="text-[10px] text-slate-500">{a.ini}{a.fim && `–${a.fim}`} {a.local && `· ${a.local}`}</div></div>
+                <button onClick={()=>remove(a.id)} className="text-slate-600"><Ic.Trash size={14}/></button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+/* ================= FINANCEIRO ================= */
+const CATEGORIES = { "Moradia":"#8AA6C1","Alimentação":"#C9A227","Transporte":"#7C8FA6","Saúde":"#4F9D69","Lazer":"#B5657A","Pessoal":"#9C8ACB","Assinaturas":"#5FA8A0","Pet":"#D08A4C","Outros":"#6B7280" };
+const CAT_LIST = Object.keys(CATEGORIES);
+const MILESTONE_LIST = [300000,500000,1000000];
+function nextYM(y,m){ m+=1; if(m>12){m=1;y+=1;} return [y,m]; }
+function ymKey(y,m){ return `${y}-${String(m).padStart(2,"0")}`; }
+function pedroSpecials(y,m){
+  let extra=0; const notes=[];
+  if (m===5 && y>=2027){ const plr=24000+(y-2027)*1000; extra+=plr; notes.push(`PLR ${fmtCompact(plr)}`); }
+  if (m===7 && y>=2027){ extra+=5400+6850; notes.push("FGTS+13º"); }
+  if (m===12){ extra+=4000; notes.push("13º"); }
+  if (y===2027 && m===9){ extra+=15000; notes.push("aporte GE"); }
+  return {extra, notes};
+}
+function noSpecials(){ return {extra:0, notes:[]}; }
+function buildProjection({ startTotal, startY, startM, returnRate, monthlyTarget, specialsFn }) {
+  let y=startY, m=startM, total=startTotal;
+  const points = [{month: ymKey(y,m), value: total}];
+  const milestoneMonth = {};
+  MILESTONE_LIST.forEach(k => { if (total>=k) milestoneMonth[k]=ymKey(y,m); });
+  for (let i=0;i<300;i++){
+    [y,m]=nextYM(y,m);
+    const {extra} = specialsFn(y,m);
+    total = total*(1+returnRate) + monthlyTarget + extra;
+    const key = ymKey(y,m);
+    points.push({month:key, value: total});
+    MILESTONE_LIST.forEach(k => { if(!milestoneMonth[k] && total>=k) milestoneMonth[k]=key; });
+    if (milestoneMonth[1000000]) break;
+  }
+  return { points, milestoneMonth };
+}
+function EditableNumber({ value, display, onCommit, style, accent }) {
+  const [editing, setEditing] = useState(false); const [draft, setDraft] = useState(value);
+  if (editing) return <input autoFocus type="number" style={{...style, background:"transparent", border:"none", borderBottom:`1px solid ${accent}`, outline:"none", maxWidth:200}}
+    value={draft} onChange={(e)=>setDraft(n(e.target.value))} onBlur={()=>{onCommit(draft);setEditing(false);}} onKeyDown={(e)=>{if(e.key==="Enter"){onCommit(draft);setEditing(false);}}} />;
+  return <div onClick={()=>{setDraft(value);setEditing(true);}} style={{...style, cursor:"pointer"}}>{display}</div>;
+}
+
+function FinResumo({ totalExpenses, byCategory, monthContrib, monthlyTarget, accent }) {
+  const maxCat = Math.max(1, ...byCategory.map(c=>c.total));
+  const diaAtual = new Date().getDate();
+  const diasNoMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
+  const ritmoEsperado = monthlyTarget * (diaAtual/diasNoMes);
+  const atrasado = monthlyTarget>0 && monthContrib < ritmoEsperado*0.85 && diaAtual > 5;
+  return (
+    <div className="space-y-4">
+      <Card>
+        <Titulo icon={Ic.Money} accent={accent} extra={<span className="font-bold" style={{fontFamily:"'Fraunces',serif", fontSize:20}}>{fmt(totalExpenses)}</span>}>Gastos por categoria</Titulo>
+        {byCategory.length===0 && <p className="text-slate-500 text-sm">Nenhum gasto cadastrado.</p>}
+        <div className="space-y-2.5">
+          {byCategory.sort((a,b)=>b.total-a.total).map(c => (
+            <div key={c.cat}>
+              <div className="flex justify-between text-xs mb-1"><span className="text-slate-300">{c.cat}</span><span className="text-slate-500">{fmt(c.total)}</span></div>
+              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden"><div className="h-full" style={{width:`${(c.total/maxCat)*100}%`, background:CATEGORIES[c.cat]}} /></div>
+            </div>
+          ))}
+        </div>
+      </Card>
+      <Card className={atrasado ? "border-red-500/50" : ""}>
+        <Titulo icon={Ic.Target} accent={accent}>Meta de investimento do mês</Titulo>
+        {monthlyTarget<=0 ? <p className="text-slate-500 text-sm">Defina uma meta na aba Aportes.</p> : (
+          <>
+            <div className={`text-sm ${atrasado?"text-red-400":"text-slate-300"}`}>
+              {monthContrib >= monthlyTarget ? "Meta do mês batida ✓" : atrasado ? `Fora do ritmo — já deveria ter ~${fmt(ritmoEsperado)}, tem ${fmt(monthContrib)}.` : `Faltam ${fmt(monthlyTarget-monthContrib)} pra bater a meta.`}
+            </div>
+          </>
+        )}
+      </Card>
+    </div>
+  );
+}
+function FinGastos({ expenses, setExpenses, accent }) {
+  const [desc,setDesc]=useState(""); const [category,setCategory]=useState(CAT_LIST[0]); const [amount,setAmount]=useState("");
+  const total = expenses.reduce((s,e)=>s+n(e.amount),0);
+  const add = () => { if(!desc.trim()||!amount) return; setExpenses([...expenses,{id:uid(),desc:desc.trim(),category,amount:n(amount)}]); setDesc("");setAmount(""); };
+  const remove = (id) => setExpenses(expenses.filter(e=>e.id!==id));
+  return (
+    <div className="space-y-4">
+      <Card>
+        <input value={desc} onChange={(e)=>setDesc(e.target.value)} placeholder="descrição do gasto" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none mb-2" />
+        <div className="flex gap-2">
+          <select value={category} onChange={(e)=>setCategory(e.target.value)} className="flex-1 bg-slate-800 rounded-lg px-2 py-2 text-xs outline-none">{CAT_LIST.map(c=><option key={c} value={c}>{c}</option>)}</select>
+          <input value={amount} onChange={(e)=>setAmount(e.target.value)} type="number" placeholder="R$" className="w-24 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <button onClick={add} className="rounded-lg px-3 text-sm font-semibold" style={{background:accent,color:"#020617"}}><Ic.Plus size={16}/></button>
+        </div>
+      </Card>
+      {expenses.map(e => (
+        <div key={e.id} className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5">
+          <div className="flex items-center gap-2 min-w-0"><span className="w-2 h-2 rounded-full shrink-0" style={{background:CATEGORIES[e.category]}} /><div className="min-w-0"><div className="text-sm truncate">{e.desc}</div><div className="text-[10px] text-slate-500">{e.category}</div></div></div>
+          <div className="flex items-center gap-2 shrink-0"><span className="text-sm text-slate-300">{fmt(e.amount)}</span><button onClick={()=>remove(e.id)} className="text-slate-600"><Ic.Trash size={14}/></button></div>
+        </div>
+      ))}
+      <div className="flex justify-between pt-2 border-t border-slate-800"><span className="text-xs text-slate-400 uppercase">Total</span><span className="font-bold" style={{fontFamily:"'Fraunces',serif"}}>{fmt(total)}</span></div>
+    </div>
+  );
+}
+function FinAportes({ investments, setInvestments, thisMonth, accent }) {
+  const [month,setMonth]=useState(thisMonth); const [amount,setAmount]=useState(""); const [note,setNote]=useState("");
+  const add = () => { if(!amount) return; setInvestments([...investments,{id:uid(),month,amount:n(amount),note:note.trim()}].sort((a,b)=>a.month<b.month?1:-1)); setAmount("");setNote(""); };
+  const remove = (id) => setInvestments(investments.filter(i=>i.id!==id));
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex gap-2 mb-2">
+          <input type="month" value={month} onChange={(e)=>setMonth(e.target.value)} className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <input type="number" value={amount} onChange={(e)=>setAmount(e.target.value)} placeholder="R$" className="w-28 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+        </div>
+        <div className="flex gap-2">
+          <input value={note} onChange={(e)=>setNote(e.target.value)} placeholder="nota (opcional)" className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <button onClick={add} className="rounded-lg px-3 text-sm font-semibold" style={{background:accent,color:"#020617"}}>+</button>
+        </div>
+      </Card>
+      {investments.map(i => (
+        <div key={i.id} className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5">
+          <div><div className="text-sm">{mesLabel(i.month)}</div>{i.note && <div className="text-[10px] text-slate-500">{i.note}</div>}</div>
+          <div className="flex items-center gap-2"><span className="text-sm text-emerald-400">+{fmt(i.amount)}</span><button onClick={()=>remove(i.id)} className="text-slate-600"><Ic.Trash size={14}/></button></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+function FinProjecoes({ investments, baseInvested, totalInvested, monthlyTarget, thisMonth, returnRate, setReturnRate, accent, specialsFn }) {
+  const [startY,startM] = thisMonth.split("-").map(Number);
+  const monthsWithData = Array.from(new Set(investments.map(i=>i.month))).sort();
+  let running = baseInvested; const realByMonth={};
+  monthsWithData.forEach(mo => { running += investments.filter(i=>i.month===mo).reduce((s,i)=>s+i.amount,0); realByMonth[mo]=running; });
+  if (!realByMonth[thisMonth]) realByMonth[thisMonth]=totalInvested;
+  const { points, milestoneMonth } = buildProjection({ startTotal: totalInvested, startY, startM, returnRate, monthlyTarget, specialsFn });
+  const chartData = points.map((p,idx)=>({ month: mesLabel(p.month), real: realByMonth[p.month]!==undefined?realByMonth[p.month]:(idx===0?totalInvested:null), projetado: p.value }));
+  if (chartData[0]) chartData[0].real = totalInvested;
+  const yMax = Math.max(1000000*1.05, ...points.map(p=>p.value));
+  return (
+    <div className="space-y-4">
+      <Card>
+        <div className="flex justify-between items-center mb-2"><span className="text-xs text-slate-400 uppercase">Projeção</span>
+          <span className="text-[11px] text-slate-500 flex items-center gap-1">retorno/mês <input type="number" step="0.1" value={(returnRate*100).toFixed(2).replace(/\.?0+$/,"")} onChange={(e)=>setReturnRate(n(e.target.value)/100)} className="w-12 bg-slate-800 rounded px-1 outline-none" />%</span>
+        </div>
+        <div className="h-56"><ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData} margin={{top:6,right:8,left:-16,bottom:0}}>
+            <CartesianGrid stroke="#1e293b" vertical={false} />
+            <XAxis dataKey="month" tick={{fontSize:9,fill:"#64748b"}} interval={Math.ceil(chartData.length/8)} />
+            <YAxis tickFormatter={fmtCompact} tick={{fontSize:9,fill:"#64748b"}} domain={[0,yMax]} width={40} />
+            <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:11}} formatter={(v,name)=>[fmt(v), name==="real"?"registrado":"projetado"]} />
+            {MILESTONE_LIST.map(k=><ReferenceLine key={k} y={k} stroke="#334155" strokeDasharray="3 3" />)}
+            <Line type="monotone" dataKey="real" stroke="#4ade80" strokeWidth={2.5} dot={{r:3}} connectNulls />
+            <Line type="monotone" dataKey="projetado" stroke={accent} strokeWidth={2} strokeDasharray="5 4" dot={false} />
+          </LineChart>
+        </ResponsiveContainer></div>
+      </Card>
+      <Card>
+        <Titulo icon={Ic.Target} accent={accent}>Avisos de meta</Titulo>
+        <div className="space-y-2">
+          {MILESTONE_LIST.map(k => { const mo=milestoneMonth[k]; const already=totalInvested>=k;
+            return <div key={k} className="flex justify-between items-center bg-slate-800/50 rounded-lg px-3 py-2" style={{borderLeft:`3px solid ${already?"#4ade80":accent}`}}>
+              <span className="font-semibold" style={{fontFamily:"'Fraunces',serif"}}>{fmtCompact(k)}</span>
+              <span className={`text-xs ${already?"text-emerald-400":"text-slate-300"}`}>{already?"já batido":mo?`previsto p/ ${mesLabel(mo)}`:"fora do horizonte"}</span>
+            </div>;
+          })}
+        </div>
+      </Card>
+    </div>
+  );
+}
+/* ================= CASAL: diário de relacionamento (compartilhado) ================= */
+function DiarioCasal({ entradas, setEntradas, activePerson, accent }) {
+  const [texto, setTexto] = useState(""); const [humor, setHumor] = useState("😊");
+  const HUMORES = ["😍","😊","🙂","😐","😔","😤","🥳"];
+  const add = () => { if(!texto.trim()) return; setEntradas([{ id: uid(), data: hoje(), autor: activePerson, texto: texto.trim(), humor }, ...entradas]); setTexto(""); };
+  const remove = (id) => setEntradas(entradas.filter(e=>e.id!==id));
+  return (
+    <div className="space-y-4">
+      <Card>
+        <Titulo icon={Ic.Heart} accent={accent}>Nova entrada</Titulo>
+        <div className="flex gap-1.5 mb-2">
+          {HUMORES.map(h => <button key={h} onClick={()=>setHumor(h)} className={`text-xl rounded-lg w-9 h-9 ${humor===h?"bg-slate-700":"bg-slate-800/50"}`}>{h}</button>)}
+        </div>
+        <textarea value={texto} onChange={(e)=>setTexto(e.target.value)} placeholder="Como foi o dia, o que aconteceu, o que sentiu…" rows={3} className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none resize-none mb-2" />
+        <button onClick={add} className="w-full rounded-lg py-2 text-sm font-semibold" style={{background:accent,color:"#020617"}}>Salvar</button>
+      </Card>
+      {entradas.map(e => (
+        <Card key={e.id}>
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">{e.humor}</span>
+              <div><div className="text-sm font-medium">{THEMES[e.autor]?.label || e.autor}</div><div className="text-[10px] text-slate-500">{longo(e.data)}</div></div>
+            </div>
+            <button onClick={()=>remove(e.id)} className="text-slate-600"><Ic.Trash size={14}/></button>
+          </div>
+          <p className="text-sm text-slate-300 mt-2 whitespace-pre-wrap">{e.texto}</p>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/* ================= PET: registro mensal, múltiplos pets ================= */
+function AreaPet({ pets, setPets, accent }) {
+  const [novoNome, setNovoNome] = useState(""); const [novaEspecie, setNovaEspecie] = useState("");
+  const [petAtivo, setPetAtivo] = useState(pets[0]?.id || null);
+
+  const addPet = () => { if(!novoNome.trim()) return; const novo={id:uid(),nome:novoNome.trim(),especie:novaEspecie.trim(),registros:[]}; setPets([...pets,novo]); setPetAtivo(novo.id); setNovoNome("");setNovaEspecie(""); };
+  const removePet = (id) => { setPets(pets.filter(p=>p.id!==id)); if(petAtivo===id) setPetAtivo(null); };
+
+  const pet = pets.find(p=>p.id===petAtivo);
+  const [mes, setMes] = useState(mesAtual()); const [peso, setPeso] = useState(""); const [obs, setObs] = useState(""); const [vacina, setVacina] = useState(""); const [custo, setCusto] = useState("");
+
+  const addRegistro = () => {
+    if (!pet) return;
+    const novoReg = { id: uid(), mes, peso: peso?n(peso):null, obs: obs.trim(), vacina: vacina.trim(), custo: custo?n(custo):null };
+    const petsAtualizados = pets.map(p => p.id===pet.id ? { ...p, registros: [...p.registros, novoReg].sort((a,b)=>a.mes.localeCompare(b.mes)) } : p);
+    setPets(petsAtualizados);
+    setPeso("");setObs("");setVacina("");setCusto("");
+  };
+  const removeRegistro = (id) => setPets(pets.map(p => p.id===pet.id ? { ...p, registros: p.registros.filter(r=>r.id!==id) } : p));
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <Titulo icon={Ic.Pet} accent={accent}>Pets</Titulo>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {pets.map(p => (
+            <button key={p.id} onClick={()=>setPetAtivo(p.id)} className="px-3 py-1.5 rounded-lg text-xs font-medium" style={petAtivo===p.id?{background:accent,color:"#020617"}:{background:"#1e293b",color:"#94a3b8"}}>
+              {p.nome}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input value={novoNome} onChange={(e)=>setNovoNome(e.target.value)} placeholder="Nome do pet" className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <input value={novaEspecie} onChange={(e)=>setNovaEspecie(e.target.value)} placeholder="espécie" className="w-24 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+          <button onClick={addPet} className="bg-slate-700 rounded-lg px-3"><Ic.Plus size={16}/></button>
+        </div>
+      </Card>
+
+      {pet && (
+        <>
+          <Card>
+            <div className="flex items-center justify-between mb-3">
+              <Titulo icon={Ic.Pet} accent={accent}>{pet.nome} {pet.especie && `· ${pet.especie}`}</Titulo>
+              <button onClick={()=>removePet(pet.id)} className="text-slate-600 text-xs">remover pet</button>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <input type="month" value={mes} onChange={(e)=>setMes(e.target.value)} className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+              <input type="number" value={peso} onChange={(e)=>setPeso(e.target.value)} placeholder="peso (kg)" className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <input value={vacina} onChange={(e)=>setVacina(e.target.value)} placeholder="vacina/vermífugo" className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+              <input type="number" value={custo} onChange={(e)=>setCusto(e.target.value)} placeholder="custo (R$)" className="bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+            </div>
+            <input value={obs} onChange={(e)=>setObs(e.target.value)} placeholder="observações" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none mb-2" />
+            <button onClick={addRegistro} className="w-full rounded-lg py-2 text-sm font-semibold" style={{background:accent,color:"#020617"}}>Adicionar registro do mês</button>
+          </Card>
+
+          {pet.registros.length>=2 && (
+            <Card>
+              <Titulo icon={Ic.Chart} accent={accent}>Peso ao longo do tempo</Titulo>
+              <div className="h-40"><ResponsiveContainer width="100%" height="100%">
+                <LineChart data={pet.registros.filter(r=>r.peso!=null).map(r=>({m:mesLabel(r.mes), peso:r.peso}))}>
+                  <CartesianGrid stroke="#1e293b" vertical={false} />
+                  <XAxis dataKey="m" tick={{fontSize:9,fill:"#64748b"}} />
+                  <YAxis tick={{fontSize:9,fill:"#64748b"}} width={30} />
+                  <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:11}} />
+                  <Line type="monotone" dataKey="peso" stroke={accent} strokeWidth={2} dot={{r:3}} />
+                </LineChart>
+              </ResponsiveContainer></div>
+            </Card>
+          )}
+
+          <Card>
+            <Titulo icon={Ic.Calendar} accent={accent}>Histórico</Titulo>
+            <div className="space-y-1.5">
+              {pet.registros.slice().reverse().map(r => (
+                <div key={r.id} className="flex items-start justify-between bg-slate-800/50 rounded-lg px-3 py-2">
+                  <div className="text-xs"><div className="font-medium text-slate-200">{mesLabel(r.mes)}</div>
+                    <div className="text-slate-500">{r.peso!=null && `${r.peso}kg`} {r.vacina && `· ${r.vacina}`} {r.custo!=null && `· ${fmt(r.custo)}`}</div>
+                    {r.obs && <div className="text-slate-500">{r.obs}</div>}
+                  </div>
+                  <button onClick={()=>removeRegistro(r.id)} className="text-slate-600"><Ic.Trash size={14}/></button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+/* ================= APP PRINCIPAL ================= */
+const KEY = "trindade:v1";
+const DEFAULT_EXPENSES_PEDRO = [
+  { id:"e1", desc:"Alimentação (almoço no trabalho + iFood)", category:"Alimentação", amount:500 },
+  { id:"e2", desc:"Namoro (passagens Petrópolis–SP)", category:"Lazer", amount:800 },
+  { id:"e3", desc:"Plano de saúde", category:"Saúde", amount:900 },
+  { id:"e4", desc:"Locomoção (ônibus municipal)", category:"Transporte", amount:500 },
+  { id:"e5", desc:"Wellhub", category:"Saúde", amount:82.4 },
+  { id:"e6", desc:"Assinatura", category:"Assinaturas", amount:48.99 },
+  { id:"e7", desc:"Tratamento capilar (Manual)", category:"Pessoal", amount:99.12 },
+  { id:"e8", desc:"Barbeiro", category:"Pessoal", amount:110 },
+  { id:"e9", desc:"Compras", category:"Pessoal", amount:100 },
+  { id:"e10", desc:"Cachorro (parcela 10x)", category:"Pet", amount:40 },
+];
+function pessoaDefault(sexo, kcalMin, isPedro) {
+  return {
+    saude: { perfil: novoPerfilSaude(sexo, kcalMin), dias: {}, exames: [] },
+    tarefas: { itens: isPedro ? [
+      { id: uid(), label:"Academia", hora: 20 }, { id: uid(), label:"Aeróbico", hora: 20 },
+      { id: uid(), label:"Creatina", hora: 12 }, { id: uid(), label:"Remédio capilar", hora: 21 },
+    ] : [], dias: {} },
+    financeiro: isPedro
+      ? { expenses: DEFAULT_EXPENSES_PEDRO, investments: [], baseInvested: 231000, monthlyTarget: 7200, returnRate: 0.008 }
+      : { expenses: [], investments: [], baseInvested: 0, monthlyTarget: 0, returnRate: 0.008 },
+    estudo: { itens: [], dias: {}, aulas: [] },
+    trabalho: isPedro ? { itens: [] } : undefined,
+  };
+}
+function defaultData() {
+  return {
+    pedro: pessoaDefault("m", 1800, true),
+    mariana: pessoaDefault("f", 1400, false),
+    relacionamento: [],
+    pets: [],
+  };
+}
+
+function TrindadeApp() {
+  const [data, setData] = useState(null);
+  const [activePerson, setActivePerson] = useState("pedro");
+  const [area, setArea] = useState("saude");
+  const [subSaude, setSubSaude] = useState("hoje");
+  const [subFin, setSubFin] = useState("resumo");
+  const [subEstudo, setSubEstudo] = useState("tarefas");
+  const [loading, setLoading] = useState(true);
+  const [notifOn, setNotifOn] = useState(false);
+  const primeiro = useRef(true);
+
+  const carregar = async () => {
+    let d = null;
+    try { const r = await window.storage.get(KEY, true); if (r) d = JSON.parse(r.value); } catch(e) { d = null; }
+    const def = defaultData();
+    d = d ? { ...def, ...d, pedro: {...def.pedro, ...(d.pedro||{})}, mariana: {...def.mariana, ...(d.mariana||{})} } : def;
+    primeiro.current = true;
+    setData(d);
+  };
+
+  useEffect(() => {
+    carregar().finally(()=>setLoading(false));
+    const aoVoltar = () => { if (document.visibilityState==="visible") carregar(); };
+    document.addEventListener("visibilitychange", aoVoltar);
+    window.addEventListener("focus", aoVoltar);
+    if ("Notification" in window) setNotifOn(Notification.permission === "granted");
+    return () => { document.removeEventListener("visibilitychange", aoVoltar); window.removeEventListener("focus", aoVoltar); };
+  }, []);
+
+  useEffect(() => {
+    if (!data) return;
+    if (primeiro.current) { primeiro.current = false; return; }
+    const t = setTimeout(async () => { try { await window.storage.set(KEY, JSON.stringify(data), true); } catch(e){} }, 500);
+    return () => clearTimeout(t);
+  }, [data]);
+
+  const pedirNotificacao = async () => {
+    if (!("Notification" in window)) return;
+    const perm = await Notification.requestPermission();
+    setNotifOn(perm === "granted");
+  };
+
+  if (loading || !data) return <div className="min-h-screen bg-slate-950 text-slate-400 flex items-center justify-center">Carregando…</div>;
+
+  const P = data[activePerson];
+  const theme = THEMES[activePerson];
+  const accent = theme.accent;
+
+  const setPerfilSaude = (campo, val) => setData(d => ({...d, [activePerson]: {...d[activePerson], saude: {...d[activePerson].saude, perfil: {...d[activePerson].saude.perfil, [campo]: val}}}}));
+  const diaSaudeHoje = P.saude.dias[hoje()] || novoDiaSaude();
+  const setDiaSaude = (campo, val) => setData(d => {
+    const dias = {...d[activePerson].saude.dias, [hoje()]: {...(d[activePerson].saude.dias[hoje()]||novoDiaSaude()), [campo]: val}};
+    return {...d, [activePerson]: {...d[activePerson], saude: {...d[activePerson].saude, dias}}};
+  });
+  const setExamesSaude = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], saude: {...d[activePerson].saude, exames: val}}}));
+
+  const setTarefas = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], tarefas: val}}));
+  const setTrabalho = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], trabalho: val}}));
+  const setEstudoTarefas = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], estudo: {...d[activePerson].estudo, itens: val.itens, dias: val.dias}}}));
+  const setAulas = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], estudo: {...d[activePerson].estudo, aulas: val}}}));
+
+  const setExpenses = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], financeiro: {...d[activePerson].financeiro, expenses: val}}}));
+  const setInvestments = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], financeiro: {...d[activePerson].financeiro, investments: val}}}));
+  const setBaseInvested = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], financeiro: {...d[activePerson].financeiro, baseInvested: val}}}));
+  const setMonthlyTarget = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], financeiro: {...d[activePerson].financeiro, monthlyTarget: val}}}));
+  const setReturnRate = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], financeiro: {...d[activePerson].financeiro, returnRate: val}}}));
+
+  const setRelacionamento = (val) => setData(d => ({...d, relacionamento: val}));
+  const setPets = (val) => setData(d => ({...d, pets: val}));
+
+  const totalExpenses = P.financeiro.expenses.reduce((s,e)=>s+n(e.amount),0);
+  const totalContributed = P.financeiro.investments.reduce((s,i)=>s+n(i.amount),0);
+  const totalInvested = P.financeiro.baseInvested + totalContributed;
+  const thisMonth = mesAtual();
+  const monthContrib = P.financeiro.investments.filter(i=>i.month===thisMonth).reduce((s,i)=>s+n(i.amount),0);
+  const byCategory = CAT_LIST.map(cat => ({cat, total: P.financeiro.expenses.filter(e=>e.category===cat).reduce((s,e)=>s+n(e.amount),0)})).filter(c=>c.total>0);
+
+  /* -------- alertas: tarefas atrasadas, exames fora da faixa, meta financeira em risco -------- */
+  const alertas = useMemo(() => {
+    const lista = [];
+    const horaAtual = horaAgora(); const diaHoje = hoje();
+    (P.tarefas.itens||[]).forEach(it => {
+      const feito = !!(P.tarefas.dias?.[diaHoje]?.[it.id]);
+      if (!feito && it.hora!=null && horaAtual >= it.hora) lista.push(`Tarefa atrasada: ${it.label}`);
+    });
+    (P.saude.exames||[]).forEach(e => {
+      if ((e.min!=null && e.valor<e.min) || (e.max!=null && e.valor>e.max)) lista.push(`Exame fora da faixa: ${e.nome} (${e.valor})`);
+    });
+    const diaAtual = new Date().getDate(); const diasNoMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
+    const ritmoEsperado = P.financeiro.monthlyTarget * (diaAtual/diasNoMes);
+    if (P.financeiro.monthlyTarget>0 && monthContrib < ritmoEsperado*0.85 && diaAtual>5) lista.push(`Meta de aporte do mês em risco (${fmt(monthContrib)} de ${fmt(P.financeiro.monthlyTarget)})`);
+    return lista;
+  }, [P, monthContrib]);
+
+  useEffect(() => {
+    if (!notifOn || alertas.length===0 || !("serviceWorker" in navigator)) return;
+    navigator.serviceWorker.ready.then(reg => {
+      reg.showNotification(`Trindade — ${theme.label}`, { body: alertas.slice(0,3).join("\n"), icon: "icon-192.png" });
+    }).catch(()=>{});
+    // eslint-disable-next-line
+  }, [activePerson]);
+
+  const AREAS = [
+    { k:"saude", l:"Saúde", icon: Ic.Health },
+    { k:"tarefas", l:"Tarefas", icon: Ic.Check },
+    { k:"financeiro", l:"Financeiro", icon: Ic.Money },
+    { k:"estudo", l:"Estudo", icon: Ic.Study },
+    ...(P.trabalho ? [{ k:"trabalho", l:"Trabalho", icon: Ic.Work }] : []),
+    { k:"casal", l:"Casal", icon: Ic.Heart },
+    { k:"pet", l:"Pet", icon: Ic.Pet },
+  ];
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 pb-8">
+      <div className="px-4 pt-5 pb-3">
+        <div className="flex gap-2 mb-4">
+          {Object.entries(THEMES).map(([k,t]) => (
+            <button key={k} onClick={()=>setActivePerson(k)} className="flex-1 py-2 rounded-xl text-sm font-semibold transition"
+              style={activePerson===k ? {background:t.accent, color:"#020617"} : {background:"#1e293b", color:"#94a3b8"}}>{t.label}</button>
+          ))}
+        </div>
+        <div className="flex items-center justify-between mb-1">
+          <h1 className="text-xl font-bold" style={{fontFamily:"'Fraunces',serif"}}>Trindade</h1>
+          <button onClick={pedirNotificacao} className="text-xs px-2 py-1 rounded-lg flex items-center gap-1" style={{background: notifOn ? "rgba(74,222,128,0.15)" : "#1e293b", color: notifOn ? "#4ade80" : "#94a3b8"}}>
+            <Ic.Bell size={12}/> {notifOn ? "notificações ativas" : "ativar notificações"}
+          </button>
+        </div>
+
+        {alertas.length>0 && (
+          <div className="mt-2 bg-red-500/15 border border-red-500/40 rounded-xl p-3 space-y-1">
+            {alertas.map((a,i) => <div key={i} className="text-xs text-red-300 flex items-start gap-1.5"><Ic.Warn size={12} className="shrink-0 mt-0.5"/>{a}</div>)}
+          </div>
+        )}
+      </div>
+
+      <div className="flex gap-1 px-4 overflow-x-auto pb-2 mb-3" style={{scrollbarWidth:"none"}}>
+        {AREAS.map(a => (
+          <button key={a.k} onClick={()=>setArea(a.k)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium whitespace-nowrap shrink-0"
+            style={area===a.k ? {background:"#1e293b", color:accent, boxShadow:`inset 0 0 0 1px ${accent}`} : {background:"#0f172a", color:"#64748b"}}>
+            <a.icon size={14}/>{a.l}
+          </button>
+        ))}
+      </div>
+
+      <div className="px-4">
+        {area==="saude" && (
+          <>
+            <div className="flex gap-1 mb-3">
+              {[["hoje","Hoje"],["historico","Histórico"],["exames","Exames"],["perfil","Perfil"]].map(([k,l]) => (
+                <button key={k} onClick={()=>setSubSaude(k)} className="flex-1 py-1.5 text-xs rounded-lg font-medium" style={subSaude===k?{background:"#1e293b",color:accent}:{background:"#0f172a",color:"#64748b"}}>{l}</button>
+              ))}
+            </div>
+            {subSaude==="hoje" && <SaudeHoje P={P.saude.perfil} D={diaSaudeHoje} setPerfilCampo={setPerfilSaude} setDiaCampo={setDiaSaude} accent={accent} />}
+            {subSaude==="historico" && <SaudeHistorico P={P.saude.perfil} accent={accent} />}
+            {subSaude==="exames" && <SaudeExames exames={P.saude.exames} setExames={setExamesSaude} accent={accent} />}
+            {subSaude==="perfil" && <SaudePerfil P={P.saude.perfil} setPerfilCampo={setPerfilSaude} accent={accent} />}
+          </>
+        )}
+
+        {area==="tarefas" && <ChecklistDiario bucket={P.tarefas} setBucket={setTarefas} accent={accent} corAtraso={true} />}
+
+        {area==="financeiro" && (
+          <>
+            <div className="flex gap-1 mb-3">
+              {[["resumo","Resumo"],["gastos","Gastos"],["aportes","Aportes"],["projecoes","Projeções"]].map(([k,l]) => (
+                <button key={k} onClick={()=>setSubFin(k)} className="flex-1 py-1.5 text-xs rounded-lg font-medium" style={subFin===k?{background:"#1e293b",color:accent}:{background:"#0f172a",color:"#64748b"}}>{l}</button>
+              ))}
+            </div>
+            {subFin==="resumo" && <FinResumo totalExpenses={totalExpenses} byCategory={byCategory} monthContrib={monthContrib} monthlyTarget={P.financeiro.monthlyTarget} accent={accent} />}
+            {subFin==="gastos" && <FinGastos expenses={P.financeiro.expenses} setExpenses={setExpenses} accent={accent} />}
+            {subFin==="aportes" && <FinAportes investments={P.financeiro.investments} setInvestments={setInvestments} thisMonth={thisMonth} accent={accent} />}
+            {subFin==="projecoes" && <FinProjecoes investments={P.financeiro.investments} baseInvested={P.financeiro.baseInvested} totalInvested={totalInvested} monthlyTarget={P.financeiro.monthlyTarget} thisMonth={thisMonth} returnRate={P.financeiro.returnRate} setReturnRate={setReturnRate} accent={accent} specialsFn={activePerson==="pedro"?pedroSpecials:noSpecials} />}
+            <div className="mt-3 bg-slate-900 border border-slate-800 rounded-xl p-3 flex justify-between items-center">
+              <span className="text-xs text-slate-400">Base investida / meta mensal</span>
+              <div className="flex gap-3">
+                <EditableNumber value={P.financeiro.baseInvested} display={fmt(P.financeiro.baseInvested)} onCommit={setBaseInvested} accent={accent} style={{fontSize:12, color:"#e2e8f0"}} />
+                <EditableNumber value={P.financeiro.monthlyTarget} display={fmt(P.financeiro.monthlyTarget)} onCommit={setMonthlyTarget} accent={accent} style={{fontSize:12, color:accent, fontWeight:600}} />
+              </div>
+            </div>
+          </>
+        )}
+
+        {area==="estudo" && (
+          <>
+            <div className="flex gap-1 mb-3">
+              {[["tarefas","To-do"],["cronograma","Cronograma"]].map(([k,l]) => (
+                <button key={k} onClick={()=>setSubEstudo(k)} className="flex-1 py-1.5 text-xs rounded-lg font-medium" style={subEstudo===k?{background:"#1e293b",color:accent}:{background:"#0f172a",color:"#64748b"}}>{l}</button>
+              ))}
+            </div>
+            {subEstudo==="tarefas" && <ChecklistDiario bucket={{itens:P.estudo.itens, dias:P.estudo.dias}} setBucket={setEstudoTarefas} accent={accent} corAtraso={true} />}
+            {subEstudo==="cronograma" && <Cronograma aulas={P.estudo.aulas||[]} setAulas={setAulas} accent={accent} />}
+          </>
+        )}
+
+        {area==="trabalho" && P.trabalho && <ChecklistDiario bucket={P.trabalho} setBucket={setTrabalho} accent={accent} corAtraso={false} />}
+
+        {area==="casal" && <DiarioCasal entradas={data.relacionamento} setEntradas={setRelacionamento} activePerson={activePerson} accent={accent} />}
+
+        {area==="pet" && <AreaPet pets={data.pets} setPets={setPets} accent={accent} />}
+      </div>
+    </div>
+  );
+}
+
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<TrindadeApp />);
+</script>
+</body>
+</html>
