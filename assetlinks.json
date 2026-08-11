@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "trindade.twa",
+        "sha256_cert_fingerprints": ["16:7F:DE:90:6E:E2:65:98:8B:7C:BA:0A:7C:76:46:2A:F0:E5:43:D9:73:12:21:A6:A3:58:DD:7F:41:18:3E:3F"]
+      }
+    }]
