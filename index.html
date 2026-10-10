@@ -69,7 +69,16 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("sw.js").catch(() => {});
+      navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+        .then((reg) => { reg.update().catch(() => {}); })
+        .catch(() => {});
+      // quando uma versão nova do app assume, recarrega uma vez pra mostrar ela
+      let recarregou = false;
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (recarregou) return;
+        recarregou = true;
+        window.location.reload();
+      });
     });
   }
 </script>
@@ -782,8 +791,10 @@ function FinProjecoes({ investments, baseInvested, totalInvested, monthlyTarget,
   monthsWithData.forEach(mo => { running += investments.filter(i=>i.month===mo).reduce((s,i)=>s+i.amount,0); realByMonth[mo]=running; });
   if (!realByMonth[thisMonth]) realByMonth[thisMonth]=totalInvested;
   const { points, milestoneMonth } = buildProjection({ startTotal: totalInvested, startY, startM, returnRate, monthlyTarget, specialsFn });
-  const chartData = points.map((p,idx)=>({ month: mesLabel(p.month), real: realByMonth[p.month]!==undefined?realByMonth[p.month]:(idx===0?totalInvested:null), projetado: p.value }));
-  if (chartData[0]) chartData[0].real = totalInvested;
+  // histórico real dos meses anteriores (patrimônio subindo com cada aporte), depois a projeção
+  const passado = monthsWithData.filter(mo => mo < thisMonth).map(mo => ({ month: mesLabel(mo), real: realByMonth[mo], projetado: null }));
+  const futuro = points.map((p,idx)=>({ month: mesLabel(p.month), real: idx===0 ? totalInvested : (realByMonth[p.month]!==undefined && p.month<=thisMonth ? realByMonth[p.month] : null), projetado: p.value }));
+  const chartData = [...passado, ...futuro];
   const yMax = Math.max(1000000*1.05, ...points.map(p=>p.value));
   return (
     <div className="space-y-4">
@@ -795,7 +806,7 @@ function FinProjecoes({ investments, baseInvested, totalInvested, monthlyTarget,
           <LineChart data={chartData} margin={{top:6,right:8,left:-16,bottom:0}}>
             <CartesianGrid stroke="#1e293b" vertical={false} />
             <XAxis dataKey="month" tick={{fontSize:9,fill:"#64748b"}} interval={Math.ceil(chartData.length/8)} />
-            <YAxis tickFormatter={fmtCompact} tick={{fontSize:9,fill:"#64748b"}} domain={[0,yMax]} width={40} />
+            <YAxis tickFormatter={fmtCompact} tick={{fontSize:9,fill:"#64748b"}} domain={[0,yMax]} width={50} />
             <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:11}} formatter={(v,name)=>[fmt(v), name==="real"?"registrado":"projetado"]} />
             {MILESTONE_LIST.map(k=><ReferenceLine key={k} y={k} stroke="#334155" strokeDasharray="3 3" />)}
             <Line type="monotone" dataKey="real" stroke="#4ade80" strokeWidth={2.5} dot={{r:3}} connectNulls />
@@ -836,7 +847,10 @@ function FinEvolucao({ expenses, investments, baseInvested, accent }) {
   const mediaGastos = mesesRecentes.length ? mesesRecentes.reduce((s,mo)=>s+(gastosPorMes[mo]||0),0)/mesesRecentes.length : 0;
   const mediaAportes = mesesRecentes.length ? mesesRecentes.reduce((s,mo)=>s+(aportesPorMes[mo]||0),0)/mesesRecentes.length : 0;
   const totalAtual = meses.length ? totalPorMes[meses[meses.length-1]] : baseInvested;
-  const yMaxInvest = Math.max(baseInvested*1.05, ...chartInvest.map(c=>c.total), 1);
+  // eixo começa perto da base (não do zero) pra dar pra ver o patrimônio subindo mês a mês
+  const maxTotal = Math.max(baseInvested, ...chartInvest.map(c=>c.total), 1);
+  const yMinInvest = Math.max(0, Math.floor((baseInvested*0.97)/1000)*1000);
+  const yMaxInvest = Math.ceil((maxTotal + (maxTotal-yMinInvest)*0.15 + 1)/1000)*1000;
 
   return (
     <div className="space-y-4">
@@ -852,7 +866,7 @@ function FinEvolucao({ expenses, investments, baseInvested, accent }) {
             <BarChart data={chartInvest} margin={{top:6,right:8,left:-16,bottom:0}}>
               <CartesianGrid stroke="#1e293b" vertical={false} />
               <XAxis dataKey="month" tick={{fontSize:9,fill:"#64748b"}} />
-              <YAxis tickFormatter={fmtCompact} tick={{fontSize:9,fill:"#64748b"}} domain={[0,yMaxInvest]} width={40} />
+              <YAxis tickFormatter={fmtCompact} tick={{fontSize:9,fill:"#64748b"}} domain={[yMinInvest,yMaxInvest]} allowDataOverflow width={50} />
               <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:11}} formatter={(v)=>[fmt(v), "total investido"]} />
               <ReferenceLine y={baseInvested} stroke="#f59e0b" strokeDasharray="4 3" label={{value:"base", position:"insideTopLeft", fontSize:9, fill:"#f59e0b"}} />
               <Bar dataKey="total" fill="#4ade80" radius={[4,4,0,0]} />
@@ -1357,7 +1371,7 @@ function TrindadeApp() {
     <div className="min-h-screen bg-slate-950 text-slate-100" style={{paddingBottom:"calc(84px + env(safe-area-inset-bottom))"}}>
       <div className="px-4 pt-5 pb-3">
         <div className="flex items-center justify-between mb-1">
-          <h1 className="text-xl font-bold" style={{fontFamily:"'Fraunces',serif"}}>Trindade</h1>
+          <h1 className="text-xl font-bold flex items-baseline gap-2" style={{fontFamily:"'Fraunces',serif"}}>Trindade <span className="text-[10px] font-normal text-slate-500" style={{fontFamily:"system-ui"}}>v3 · 10/out</span></h1>
           <button onClick={pedirNotificacao} className="text-xs px-2 py-1 rounded-lg flex items-center gap-1" style={{background: notifOn ? "rgba(74,222,128,0.15)" : "#1e293b", color: notifOn ? "#4ade80" : "#94a3b8"}}>
             <Ic.Bell size={12}/> {notifOn ? "notificações ativas" : "ativar notificações"}
           </button>
@@ -1398,9 +1412,9 @@ function TrindadeApp() {
 
         {area==="financeiro" && (
           <>
-            <div className="flex gap-1 mb-3">
+            <div className="flex gap-1 mb-3 overflow-x-auto" style={{scrollbarWidth:"none"}}>
               {[["resumo","Resumo"],["gastos","Gastos"],["aportes","Aportes"],["evolucao","Evolução"],["projecoes","Projeções"]].map(([k,l]) => (
-                <button key={k} onClick={()=>setSubFin(k)} className="flex-1 py-1.5 text-xs rounded-lg font-medium" style={subFin===k?{background:"#1e293b",color:accent}:{background:"#0f172a",color:"#64748b"}}>{l}</button>
+                <button key={k} onClick={()=>setSubFin(k)} className="flex-1 shrink-0 whitespace-nowrap px-3 py-1.5 text-xs rounded-lg font-medium" style={subFin===k?{background:"#1e293b",color:accent}:{background:"#0f172a",color:"#64748b"}}>{l}</button>
               ))}
             </div>
             {subFin==="resumo" && <FinResumo mes={mesFin} setMes={setMesFin} totalExpenses={totalExpenses} byCategory={byCategory} monthContrib={monthContrib} monthlyTarget={P.financeiro.monthlyTarget} isCurrentMonth={mesFin===thisMonth} accent={accent} />}
