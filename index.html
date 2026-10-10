@@ -18,20 +18,18 @@
   #root { min-height:100vh; }
 </style>
 <script src="https://cdn.tailwindcss.com"></script>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
-<script src="https://unpkg.com/recharts@2/umd/Recharts.js"></script>
-<script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-is@18/umd/react-is.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/prop-types@15/prop-types.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/recharts@2/umd/Recharts.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/tesseract.js@5/dist/tesseract.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 <div id="root"></div>
 
 <script>
-  // shim: emula a API window.storage usada no artifact do Claude, gravando
-  // no Firebase Realtime Database (no "trindade") -- sincroniza entre os
-  // celulares do Pedro e da Mariana.
   const FIREBASE_URL = "https://apps-5716a-default-rtdb.firebaseio.com";
   const sanitize = (k) => k.replace(/[.#$\[\]:]/g, "_");
 
@@ -76,7 +74,7 @@
   }
 </script>
 
-<script type="text/babel" data-presets="react">
+<script id="app-code" type="text/plain">
 const { useState, useEffect, useMemo, useRef } = React;
 const { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, CartesianGrid, BarChart, Bar } = Recharts;
 
@@ -127,13 +125,13 @@ const burn = (met, min, kg) => (min > 0 && kg > 0 ? Math.round(((met - 1) * 3.5 
 const tmbDe = (kg, alt, idade, sexo) => Math.round(10 * kg + 6.25 * alt - 5 * idade + (sexo === "m" ? 5 : -161));
 
 function novoDiaSaude() { return { agua: 0, musc: 0, muscInt: "moderado", aero: 0, aeroTipo: "caminhada", along: 0, comidas: [], peso: "", gord: "", massa: "" }; }
-function novoPerfilSaude(sexo, kcalMin) { return { sexo, idade: "", altura: "", pesoInicial: "", meta: "", neat: 1.375, metaAgua: "", metaProt: "", kcalMin, dias: {} }; }
+function novoPerfilSaude(sexo, kcalMin) { return { sexo, idade: "", altura: "", pesoInicial: "", meta: "", neat: 1.375, metaAgua: "", metaProt: "", kcalMin }; }
 
 function Card({ children, className = "" }) { return <div className={`bg-slate-900 rounded-2xl p-4 border border-slate-800 ${className}`}>{children}</div>; }
 function Titulo({ icon: Icon, children, accent, extra }) {
   return (
     <div className="flex items-center justify-between mb-3">
-      <div className="flex items-center gap-2"><Icon size={17} />{ }<h3 className="font-semibold text-sm" style={{color:"#e2e8f0"}}>{children}</h3></div>
+      <div className="flex items-center gap-2"><Icon size={17} /><h3 className="font-semibold text-sm" style={{color:"#e2e8f0"}}>{children}</h3></div>
       {extra}
     </div>
   );
@@ -141,7 +139,7 @@ function Titulo({ icon: Icon, children, accent, extra }) {
 const Num = (p) => <input type="number" inputMode="decimal" {...p} className={`bg-slate-800 rounded-lg px-3 py-2 text-sm w-full outline-none focus:ring-1 focus:ring-slate-600 ${p.className || ""}`} />;
 function Aviso({ children }) { return <p className="mt-2 text-[11px] text-amber-400 flex gap-1.5"><Ic.Warn size={13} className="shrink-0 mt-0.5" /><span>{children}</span></p>; }
 
-function SaudeHoje({ P, D, setPerfilCampo, setDiaCampo, accent }) {
+function SaudeHoje({ P, D, dia, onDia, setPerfilCampo, setDiaCampo, accent }) {
   const completo = n(P.idade) > 0 && n(P.altura) > 0 && n(P.pesoInicial) > 0 && n(P.meta) > 0;
   const pesoAtualAux = n(D.peso) > 0 ? n(D.peso) : n(P.pesoInicial);
   const calc = (rec, kg) => {
@@ -175,6 +173,12 @@ function SaudeHoje({ P, D, setPerfilCampo, setDiaCampo, accent }) {
 
   return (
     <div className="space-y-4">
+      <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-3 py-2">
+        <button onClick={() => onDia(addDays(dia, -1))} className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center active:scale-95"><Ic.Left size={16}/></button>
+        <div className="text-sm font-medium">{dia === hoje() ? "Hoje" : longo(dia)}</div>
+        <button onClick={() => onDia(addDays(dia, 1))} disabled={dia >= hoje()} className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center active:scale-95 disabled:opacity-30"><Ic.Right size={16}/></button>
+      </div>
+
       {!completo && (
         <div className="w-full flex items-center gap-2 bg-amber-500/15 border border-amber-500/40 text-amber-300 rounded-2xl p-3 text-sm">
           <Ic.Warn size={18} className="shrink-0" /><span>Complete o perfil (aba Perfil) pra calcular o gasto calórico.</span>
@@ -281,8 +285,8 @@ function BlocoTreino({ label, min, onMin, kcal, minMeta, sel, onSel, opts }) {
     </div>
   );
 }
-function SaudeHistorico({ P, accent }) {
-  const diasOrd = useMemo(() => Object.entries(P.dias || {}).sort((a,b)=>a[0].localeCompare(b[0])), [P.dias]);
+function SaudeHistorico({ P, dias, accent }) {
+  const diasOrd = useMemo(() => Object.entries(dias || {}).sort((a,b)=>a[0].localeCompare(b[0])), [dias]);
   const pesos = diasOrd.filter(([,r])=>n(r.peso)>0).map(([d,r])=>({d:curto(d), peso:n(r.peso), gordPct:n(r.gord)||null, massa:n(r.massa)||null}));
   return (
     <div className="space-y-4">
@@ -301,17 +305,30 @@ function SaudeHistorico({ P, accent }) {
           </ResponsiveContainer></div>
         )}
       </Card>
-      {pesos.some(p=>p.gordPct||p.massa) && (
+      {pesos.some(p=>p.massa) && (
         <Card>
-          <Titulo icon={Ic.Chart} accent={accent}>Composição corporal</Titulo>
-          <div className="h-44 -ml-2"><ResponsiveContainer width="100%" height="100%">
+          <Titulo icon={Ic.Chart} accent={accent}>Massa magra (kg)</Titulo>
+          <div className="h-40 -ml-2"><ResponsiveContainer width="100%" height="100%">
             <LineChart data={pesos}>
               <CartesianGrid stroke="#1e293b" vertical={false} />
               <XAxis dataKey="d" tick={{fontSize:10,fill:"#64748b"}} />
-              <YAxis tick={{fontSize:10,fill:"#64748b"}} width={35} />
+              <YAxis tick={{fontSize:10,fill:"#64748b"}} width={35} domain={["dataMin - 1","dataMax + 1"]} />
               <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:12}} />
-              <Line type="monotone" dataKey="gordPct" name="Gordura %" stroke="#fb923c" strokeWidth={2} dot={{r:2}} connectNulls />
-              <Line type="monotone" dataKey="massa" name="Massa kg" stroke="#34d399" strokeWidth={2} dot={{r:2}} connectNulls />
+              <Line type="monotone" dataKey="massa" stroke="#34d399" strokeWidth={2} dot={{r:3}} connectNulls />
+            </LineChart>
+          </ResponsiveContainer></div>
+        </Card>
+      )}
+      {pesos.some(p=>p.gordPct) && (
+        <Card>
+          <Titulo icon={Ic.Chart} accent={accent}>Gordura (%)</Titulo>
+          <div className="h-40 -ml-2"><ResponsiveContainer width="100%" height="100%">
+            <LineChart data={pesos}>
+              <CartesianGrid stroke="#1e293b" vertical={false} />
+              <XAxis dataKey="d" tick={{fontSize:10,fill:"#64748b"}} />
+              <YAxis tick={{fontSize:10,fill:"#64748b"}} width={35} domain={["dataMin - 1","dataMax + 1"]} />
+              <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:12}} />
+              <Line type="monotone" dataKey="gordPct" stroke="#fb923c" strokeWidth={2} dot={{r:3}} connectNulls />
             </LineChart>
           </ResponsiveContainer></div>
         </Card>
@@ -610,6 +627,7 @@ const CAT_LIST = Object.keys(CATEGORIES);
 const MILESTONE_LIST = [300000,500000,1000000];
 function nextYM(y,m){ m+=1; if(m>12){m=1;y+=1;} return [y,m]; }
 function ymKey(y,m){ return `${y}-${String(m).padStart(2,"0")}`; }
+function shiftMonth(ym, delta){ let [y,m]=ym.split("-").map(Number); m+=delta; while(m<1){m+=12;y-=1;} while(m>12){m-=12;y+=1;} return ymKey(y,m); }
 function pedroSpecials(y,m){
   let extra=0; const notes=[];
   if (m===5 && y>=2027){ const plr=24000+(y-2027)*1000; extra+=plr; notes.push(`PLR ${fmtCompact(plr)}`); }
@@ -642,17 +660,27 @@ function EditableNumber({ value, display, onCommit, style, accent }) {
   return <div onClick={()=>{setDraft(value);setEditing(true);}} style={{...style, cursor:"pointer"}}>{display}</div>;
 }
 
-function FinResumo({ totalExpenses, byCategory, monthContrib, monthlyTarget, accent }) {
+function MesNav({ mes, setMes, accent }) {
+  return (
+    <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-3 py-2">
+      <button onClick={()=>setMes(shiftMonth(mes,-1))} className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center active:scale-95"><Ic.Left size={16}/></button>
+      <span className="text-sm font-medium" style={{fontFamily:"'Fraunces',serif", color:accent}}>{mesLabel(mes)}</span>
+      <button onClick={()=>setMes(shiftMonth(mes,1))} disabled={mes>=mesAtual()} className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center active:scale-95 disabled:opacity-30"><Ic.Right size={16}/></button>
+    </div>
+  );
+}
+function FinResumo({ mes, setMes, totalExpenses, byCategory, monthContrib, monthlyTarget, isCurrentMonth, accent }) {
   const maxCat = Math.max(1, ...byCategory.map(c=>c.total));
   const diaAtual = new Date().getDate();
   const diasNoMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
   const ritmoEsperado = monthlyTarget * (diaAtual/diasNoMes);
-  const atrasado = monthlyTarget>0 && monthContrib < ritmoEsperado*0.85 && diaAtual > 5;
+  const atrasado = isCurrentMonth && monthlyTarget>0 && monthContrib < ritmoEsperado*0.85 && diaAtual > 5;
   return (
     <div className="space-y-4">
+      <MesNav mes={mes} setMes={setMes} accent={accent} />
       <Card>
         <Titulo icon={Ic.Money} accent={accent} extra={<span className="font-bold" style={{fontFamily:"'Fraunces',serif", fontSize:20}}>{fmt(totalExpenses)}</span>}>Gastos por categoria</Titulo>
-        {byCategory.length===0 && <p className="text-slate-500 text-sm">Nenhum gasto cadastrado.</p>}
+        {byCategory.length===0 && <p className="text-slate-500 text-sm">Nenhum gasto nesse mês.</p>}
         <div className="space-y-2.5">
           {byCategory.sort((a,b)=>b.total-a.total).map(c => (
             <div key={c.cat}>
@@ -662,41 +690,63 @@ function FinResumo({ totalExpenses, byCategory, monthContrib, monthlyTarget, acc
           ))}
         </div>
       </Card>
-      <Card className={atrasado ? "border-red-500/50" : ""}>
-        <Titulo icon={Ic.Target} accent={accent}>Meta de investimento do mês</Titulo>
-        {monthlyTarget<=0 ? <p className="text-slate-500 text-sm">Defina uma meta na aba Aportes.</p> : (
-          <>
+      {isCurrentMonth && (
+        <Card className={atrasado ? "border-red-500/50" : ""}>
+          <Titulo icon={Ic.Target} accent={accent}>Meta de investimento do mês</Titulo>
+          {monthlyTarget<=0 ? <p className="text-slate-500 text-sm">Defina uma meta na aba Aportes.</p> : (
             <div className={`text-sm ${atrasado?"text-red-400":"text-slate-300"}`}>
               {monthContrib >= monthlyTarget ? "Meta do mês batida ✓" : atrasado ? `Fora do ritmo — já deveria ter ~${fmt(ritmoEsperado)}, tem ${fmt(monthContrib)}.` : `Faltam ${fmt(monthlyTarget-monthContrib)} pra bater a meta.`}
             </div>
-          </>
-        )}
-      </Card>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
-function FinGastos({ expenses, setExpenses, accent }) {
-  const [desc,setDesc]=useState(""); const [category,setCategory]=useState(CAT_LIST[0]); const [amount,setAmount]=useState("");
-  const total = expenses.reduce((s,e)=>s+n(e.amount),0);
-  const add = () => { if(!desc.trim()||!amount) return; setExpenses([...expenses,{id:uid(),desc:desc.trim(),category,amount:n(amount)}]); setDesc("");setAmount(""); };
+function FinGastos({ expenses, setExpenses, mes, setMes, accent }) {
+  const [desc,setDesc]=useState(""); const [category,setCategory]=useState(CAT_LIST[0]); const [amount,setAmount]=useState(""); const [data,setDataCampo]=useState(hoje());
+  const semData = expenses.filter(e => !e.data);
+  const doMes = expenses.filter(e => e.data && e.data.slice(0,7)===mes).sort((a,b)=> b.data.localeCompare(a.data));
+  const total = doMes.reduce((s,e)=>s+n(e.amount),0);
+  const add = () => { if(!desc.trim()||!amount) return; setExpenses([...expenses,{id:uid(),desc:desc.trim(),category,amount:n(amount),data}]); setDesc("");setAmount(""); };
   const remove = (id) => setExpenses(expenses.filter(e=>e.id!==id));
+  const setDataDe = (id, novaData) => setExpenses(expenses.map(e => e.id===id ? {...e, data: novaData} : e));
   return (
     <div className="space-y-4">
+      {semData.length>0 && (
+        <Card className="border-amber-500/40">
+          <Titulo icon={Ic.Warn} accent="#f59e0b">Gastos antigos sem data ({semData.length})</Titulo>
+          <p className="text-xs text-slate-400 mb-2">Esses foram lançados antes de existir o campo de data — defina a data real de cada um pra eles entrarem no mês certo.</p>
+          <div className="space-y-1.5">
+            {semData.map(e => (
+              <div key={e.id} className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2 gap-2">
+                <div className="min-w-0 flex-1"><div className="text-sm truncate">{e.desc}</div><div className="text-[10px] text-slate-500">{e.category} · {fmt(e.amount)}</div></div>
+                <input type="date" onChange={(ev)=>setDataDe(e.id, ev.target.value)} className="bg-slate-800 rounded-lg px-2 py-1.5 text-xs outline-none shrink-0" style={{colorScheme:"dark"}} />
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+      <MesNav mes={mes} setMes={setMes} accent={accent} />
       <Card>
         <input value={desc} onChange={(e)=>setDesc(e.target.value)} placeholder="descrição do gasto" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none mb-2" />
-        <div className="flex gap-2">
+        <div className="flex gap-2 mb-2">
+          <input type="date" value={data} onChange={(e)=>setDataCampo(e.target.value)} className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
           <select value={category} onChange={(e)=>setCategory(e.target.value)} className="flex-1 bg-slate-800 rounded-lg px-2 py-2 text-xs outline-none">{CAT_LIST.map(c=><option key={c} value={c}>{c}</option>)}</select>
-          <input value={amount} onChange={(e)=>setAmount(e.target.value)} type="number" placeholder="R$" className="w-24 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+        </div>
+        <div className="flex gap-2">
+          <input value={amount} onChange={(e)=>setAmount(e.target.value)} type="number" placeholder="R$" className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
           <button onClick={add} className="rounded-lg px-3 text-sm font-semibold" style={{background:accent,color:"#020617"}}><Ic.Plus size={16}/></button>
         </div>
       </Card>
-      {expenses.map(e => (
+      {doMes.length===0 && <p className="text-slate-500 text-sm text-center py-4">Nenhum gasto nesse mês.</p>}
+      {doMes.map(e => (
         <div key={e.id} className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5">
-          <div className="flex items-center gap-2 min-w-0"><span className="w-2 h-2 rounded-full shrink-0" style={{background:CATEGORIES[e.category]}} /><div className="min-w-0"><div className="text-sm truncate">{e.desc}</div><div className="text-[10px] text-slate-500">{e.category}</div></div></div>
+          <div className="flex items-center gap-2 min-w-0"><span className="w-2 h-2 rounded-full shrink-0" style={{background:CATEGORIES[e.category]}} /><div className="min-w-0"><div className="text-sm truncate">{e.desc}</div><div className="text-[10px] text-slate-500">{e.category} · {curto(e.data)}</div></div></div>
           <div className="flex items-center gap-2 shrink-0"><span className="text-sm text-slate-300">{fmt(e.amount)}</span><button onClick={()=>remove(e.id)} className="text-slate-600"><Ic.Trash size={14}/></button></div>
         </div>
       ))}
-      <div className="flex justify-between pt-2 border-t border-slate-800"><span className="text-xs text-slate-400 uppercase">Total</span><span className="font-bold" style={{fontFamily:"'Fraunces',serif"}}>{fmt(total)}</span></div>
+      <div className="flex justify-between pt-2 border-t border-slate-800"><span className="text-xs text-slate-400 uppercase">Total do mês</span><span className="font-bold" style={{fontFamily:"'Fraunces',serif"}}>{fmt(total)}</span></div>
     </div>
   );
 }
@@ -764,6 +814,61 @@ function FinProjecoes({ investments, baseInvested, totalInvested, monthlyTarget,
           })}
         </div>
       </Card>
+    </div>
+  );
+}
+function FinEvolucao({ expenses, investments, accent }) {
+  const gastosPorMes = {};
+  let semData = 0;
+  expenses.forEach(e => { if (!e.data) { semData += n(e.amount); return; } const mo = e.data.slice(0,7); gastosPorMes[mo] = (gastosPorMes[mo]||0) + n(e.amount); });
+  const aportesPorMes = {};
+  investments.forEach(i => { aportesPorMes[i.month] = (aportesPorMes[i.month]||0) + n(i.amount); });
+  const meses = Array.from(new Set([...Object.keys(gastosPorMes), ...Object.keys(aportesPorMes)])).sort().slice(-12);
+  const chartData = meses.map(mo => ({ month: mesLabel(mo), gastos: gastosPorMes[mo]||0, aportes: aportesPorMes[mo]||0 }));
+  const mediaGastos = meses.length ? meses.reduce((s,mo)=>s+(gastosPorMes[mo]||0),0)/meses.length : 0;
+  const mediaAportes = meses.length ? meses.reduce((s,mo)=>s+(aportesPorMes[mo]||0),0)/meses.length : 0;
+  return (
+    <div className="space-y-4">
+      {semData>0 && (
+        <Card className="border-amber-500/40">
+          <div className="text-xs text-amber-400 flex items-start gap-1.5"><Ic.Warn size={12} className="shrink-0 mt-0.5"/>{fmt(semData)} em gastos sem data ainda não entram nesse gráfico — ajuste a data deles na aba Gastos.</div>
+        </Card>
+      )}
+      <Card>
+        <Titulo icon={Ic.Chart} accent={accent}>Evolução mensal</Titulo>
+        {chartData.length===0 ? <p className="text-slate-500 text-sm">Sem dados suficientes ainda.</p> : (
+          <div className="h-56"><ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{top:6,right:8,left:-16,bottom:0}}>
+              <CartesianGrid stroke="#1e293b" vertical={false} />
+              <XAxis dataKey="month" tick={{fontSize:9,fill:"#64748b"}} />
+              <YAxis tickFormatter={fmtCompact} tick={{fontSize:9,fill:"#64748b"}} width={40} />
+              <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:11}} formatter={(v,name)=>[fmt(v), name==="gastos"?"gastos":"aportes"]} />
+              <Bar dataKey="gastos" fill="#B5657A" radius={[4,4,0,0]} />
+              <Bar dataKey="aportes" fill="#4ade80" radius={[4,4,0,0]} />
+            </BarChart>
+          </ResponsiveContainer></div>
+        )}
+        <div className="flex gap-4 mt-2 text-[11px] text-slate-500">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{background:"#B5657A"}}/>gastos</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{background:"#4ade80"}}/>aportes</span>
+        </div>
+      </Card>
+      <Card>
+        <Titulo icon={Ic.Target} accent={accent}>Médias (últimos {meses.length} meses)</Titulo>
+        <div className="flex justify-between text-sm py-1"><span className="text-slate-400">Gastos/mês</span><span className="font-semibold">{fmt(mediaGastos)}</span></div>
+        <div className="flex justify-between text-sm py-1"><span className="text-slate-400">Aportes/mês</span><span className="font-semibold text-emerald-400">{fmt(mediaAportes)}</span></div>
+      </Card>
+      <div className="space-y-2">
+        {meses.slice().reverse().map(mo => (
+          <div key={mo} className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5">
+            <span className="text-sm">{mesLabel(mo)}</span>
+            <div className="flex gap-3 text-xs">
+              <span style={{color:"#B5657A"}}>-{fmt(gastosPorMes[mo]||0)}</span>
+              <span className="text-emerald-400">+{fmt(aportesPorMes[mo]||0)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -890,6 +995,168 @@ function AreaPet({ pets, setPets, accent }) {
     </div>
   );
 }
+/* ================= HÁBITOS (aba exclusiva da Mariana) ================= */
+const CORES_HABITO = ["#38bdf8","#fb923c","#a855f7","#ef4444","#22c55e","#14b8a6","#eab308"];
+
+function diasAtras(qtd) {
+  const out = [];
+  for (let i = qtd - 1; i >= 0; i--) out.push(addDays(hoje(), -i));
+  return out;
+}
+
+function calcularStreaks(itemId, registros) {
+  // percorre os últimos 400 dias pra achar a sequência atual e o recorde
+  let atual = 0, recorde = 0, corrente = 0;
+  let d = hoje();
+  // sequência atual: conta pra trás a partir de hoje (ou ontem, se hoje ainda não foi feito)
+  let cursor = hoje();
+  if (!registros[cursor]?.[itemId]) cursor = addDays(cursor, -1);
+  while (registros[cursor]?.[itemId]) { atual++; cursor = addDays(cursor, -1); }
+  // maior sequência histórica, varrendo os últimos 365 dias
+  const todos = diasAtras(365);
+  todos.forEach((dia) => {
+    if (registros[dia]?.[itemId]) { corrente++; recorde = Math.max(recorde, corrente); }
+    else corrente = 0;
+  });
+  return { atual, recorde };
+}
+
+function Habitos({ habitos, setHabitos, accent }) {
+  const grupos = habitos.grupos || [];
+  const itens = habitos.itens || [];
+  const registros = habitos.registros || {};
+  const [showForm, setShowForm] = useState(false);
+  const [showOverview, setShowOverview] = useState(false);
+  const [editando, setEditando] = useState(null);
+
+  const [nome, setNome] = useState(""); const [descricao, setDescricao] = useState("");
+  const [cor, setCor] = useState(CORES_HABITO[0]); const [grupoId, setGrupoId] = useState("");
+  const [novoGrupoNome, setNovoGrupoNome] = useState("");
+
+  const abrirNovo = () => { setEditando(null); setNome(""); setDescricao(""); setCor(CORES_HABITO[0]); setGrupoId(grupos[0]?.id || ""); setShowForm(true); };
+  const abrirEdicao = (it) => { setEditando(it.id); setNome(it.nome); setDescricao(it.descricao||""); setCor(it.cor); setGrupoId(it.grupoId||""); setShowForm(true); };
+
+  const salvarItem = () => {
+    if (!nome.trim()) return;
+    let gId = grupoId;
+    if (novoGrupoNome.trim()) {
+      const novoGrupo = { id: uid(), nome: novoGrupoNome.trim(), cor };
+      setHabitos({ ...habitos, grupos: [...grupos, novoGrupo] });
+      gId = novoGrupo.id;
+    }
+    if (editando) {
+      setHabitos((h) => ({ ...h, itens: h.itens.map(it => it.id===editando ? { ...it, nome: nome.trim(), descricao: descricao.trim(), cor, grupoId: gId } : it) }));
+    } else {
+      setHabitos((h) => ({ ...h, itens: [...h.itens, { id: uid(), nome: nome.trim(), descricao: descricao.trim(), cor, grupoId: gId }] }));
+    }
+    setShowForm(false); setNovoGrupoNome("");
+  };
+  const excluirItem = (id) => setHabitos((h) => ({ ...h, itens: h.itens.filter(it=>it.id!==id) }));
+
+  const toggleHoje = (itemId) => {
+    const d = hoje();
+    const diaAtual = { ...(registros[d] || {}) };
+    diaAtual[itemId] = !diaAtual[itemId];
+    setHabitos({ ...habitos, registros: { ...registros, [d]: diaAtual } });
+  };
+
+  const porGrupo = useMemo(() => {
+    const semGrupo = itens.filter(it => !it.grupoId || !grupos.find(g=>g.id===it.grupoId));
+    const grupados = grupos.map(g => ({ grupo: g, lista: itens.filter(it => it.grupoId===g.id) })).filter(g=>g.lista.length>0);
+    return semGrupo.length ? [...grupados, { grupo: null, lista: semGrupo }] : grupados;
+  }, [itens, grupos]);
+
+  const diasHeatmap = diasAtras(70);
+  const totalHabitos = itens.length || 1;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-2">
+        <button onClick={() => setShowOverview(!showOverview)} className="flex-1 py-2 rounded-lg text-xs font-medium" style={showOverview?{background:"#1e293b",color:accent}:{background:"#0f172a",color:"#64748b"}}>
+          <Ic.Chart size={12}/> Visão geral
+        </button>
+        <button onClick={abrirNovo} className="flex-1 py-2 rounded-lg text-xs font-semibold" style={{background:accent,color:"#020617"}}>
+          <Ic.Plus size={12}/> Novo hábito
+        </button>
+      </div>
+
+      {showOverview && (
+        <Card>
+          <Titulo icon={Ic.Chart} accent={accent}>Últimos 70 dias</Titulo>
+          <div className="grid gap-1" style={{gridTemplateColumns:"repeat(10, 1fr)"}}>
+            {diasHeatmap.map((d) => {
+              const feitos = itens.filter(it => registros[d]?.[it.id]).length;
+              const pct = feitos / totalHabitos;
+              const cor2 = pct===0 ? "#1e293b" : pct<0.34 ? "#14532d" : pct<0.67 ? "#16a34a" : "#4ade80";
+              return <div key={d} title={`${longo(d)}: ${feitos}/${itens.length}`} className="aspect-square rounded-sm" style={{background:cor2}} />;
+            })}
+          </div>
+          <div className="flex items-center justify-end gap-1 mt-2 text-[10px] text-slate-500">
+            menos <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{background:"#1e293b"}}/>
+            <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{background:"#14532d"}}/>
+            <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{background:"#16a34a"}}/>
+            <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{background:"#4ade80"}}/> mais
+          </div>
+        </Card>
+      )}
+
+      {showForm && (
+        <Card>
+          <Titulo icon={Ic.Edit} accent={accent}>{editando ? "Editar hábito" : "Novo hábito"}</Titulo>
+          <input value={nome} onChange={(e)=>setNome(e.target.value)} placeholder="Nome do hábito" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none mb-2" />
+          <input value={descricao} onChange={(e)=>setDescricao(e.target.value)} placeholder="Descrição (opcional)" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none mb-2" />
+          <div className="flex gap-2 mb-2">
+            {CORES_HABITO.map(c => (
+              <button key={c} onClick={()=>setCor(c)} className="w-8 h-8 rounded-lg flex items-center justify-center" style={{background:c}}>
+                {cor===c && <span style={{color:"#020617"}}>✓</span>}
+              </button>
+            ))}
+          </div>
+          <select value={grupoId} onChange={(e)=>setGrupoId(e.target.value)} className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none mb-2">
+            <option value="">Sem grupo</option>
+            {grupos.map(g => <option key={g.id} value={g.id}>{g.nome}</option>)}
+          </select>
+          <input value={novoGrupoNome} onChange={(e)=>setNovoGrupoNome(e.target.value)} placeholder="ou crie um grupo novo (opcional)" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none mb-2" />
+          <div className="flex gap-2">
+            <button onClick={()=>setShowForm(false)} className="flex-1 bg-slate-800 rounded-lg py-2 text-sm">Cancelar</button>
+            <button onClick={salvarItem} className="flex-1 rounded-lg py-2 text-sm font-semibold" style={{background:accent,color:"#020617"}}>Salvar</button>
+          </div>
+          {editando && <button onClick={()=>{excluirItem(editando);setShowForm(false);}} className="w-full mt-2 text-xs text-red-400">Excluir hábito</button>}
+        </Card>
+      )}
+
+      {itens.length===0 && !showForm && <p className="text-slate-500 text-sm text-center py-6">Nenhum hábito ainda — toca em "Novo hábito" pra começar.</p>}
+
+      {porGrupo.map(({ grupo, lista }) => (
+        <Card key={grupo?.id || "sem-grupo"}>
+          {grupo && <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{color:grupo.cor}}>{grupo.nome}</div>}
+          <div className="space-y-2">
+            {lista.map((it) => {
+              const feito = !!registros[hoje()]?.[it.id];
+              const { atual, recorde } = calcularStreaks(it.id, registros);
+              return (
+                <div key={it.id} className="flex items-center gap-3 bg-slate-800/50 rounded-xl px-3 py-2.5">
+                  <button onClick={() => toggleHoje(it.id)} className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 font-bold text-sm"
+                    style={feito ? { background: it.cor, color: "#020617" } : { border: `2px solid ${it.cor}`, color: it.cor }}>
+                    {atual > 0 ? atual : "○"}
+                  </button>
+                  <button onClick={() => abrirEdicao(it)} className="flex-1 text-left min-w-0">
+                    <div className="text-sm text-slate-200 truncate">{it.nome}</div>
+                    {it.descricao && <div className="text-[10px] text-slate-500 truncate">{it.descricao}</div>}
+                  </button>
+                  <div className="text-right shrink-0">
+                    <div className="text-[10px] text-slate-500">recorde</div>
+                    <div className="text-xs font-semibold text-slate-300">{recorde}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
 /* ================= APP PRINCIPAL ================= */
 const KEY = "trindade:v1";
 const DEFAULT_EXPENSES_PEDRO = [
@@ -916,6 +1183,7 @@ function pessoaDefault(sexo, kcalMin, isPedro) {
       : { expenses: [], investments: [], baseInvested: 0, monthlyTarget: 0, returnRate: 0.008 },
     estudo: { itens: [], dias: {}, aulas: [] },
     trabalho: isPedro ? { itens: [] } : undefined,
+    habitos: !isPedro ? { grupos: [], itens: [], registros: {} } : undefined,
   };
 }
 function defaultData() {
@@ -932,19 +1200,39 @@ function TrindadeApp() {
   const [activePerson, setActivePerson] = useState("pedro");
   const [area, setArea] = useState("saude");
   const [subSaude, setSubSaude] = useState("hoje");
+  const [diaSaude, setDiaSaude_] = useState(hoje());
   const [subFin, setSubFin] = useState("resumo");
+  const [mesFin, setMesFin] = useState(mesAtual());
   const [subEstudo, setSubEstudo] = useState("tarefas");
   const [loading, setLoading] = useState(true);
   const [notifOn, setNotifOn] = useState(false);
   const primeiro = useRef(true);
+  const defaultsRef = useRef(null);
+  if (!defaultsRef.current) defaultsRef.current = defaultData();
 
   const carregar = async () => {
-    let d = null;
-    try { const r = await window.storage.get(KEY, true); if (r) d = JSON.parse(r.value); } catch(e) { d = null; }
-    const def = defaultData();
-    d = d ? { ...def, ...d, pedro: {...def.pedro, ...(d.pedro||{})}, mariana: {...def.mariana, ...(d.mariana||{})} } : def;
-    primeiro.current = true;
-    setData(d);
+    let fetched = null;
+    try {
+      const r = await window.storage.get(KEY, true);
+      if (r) fetched = JSON.parse(r.value);
+    } catch (e) { fetched = null; }
+
+    setData((prev) => {
+      if (fetched) {
+        const def = defaultsRef.current;
+        primeiro.current = true;
+        return {
+          ...def, ...fetched,
+          pedro: { ...def.pedro, ...(fetched.pedro || {}) },
+          mariana: { ...def.mariana, ...(fetched.mariana || {}) },
+        };
+      }
+      // nada veio do Firebase: se já tem dados carregados na tela, mantém como está
+      // (evita apagar tudo por causa de uma falha passageira de rede)
+      if (prev) return prev;
+      primeiro.current = true;
+      return defaultsRef.current;
+    });
   };
 
   useEffect(() => {
@@ -969,22 +1257,21 @@ function TrindadeApp() {
     setNotifOn(perm === "granted");
   };
 
-  if (loading || !data) return <div className="min-h-screen bg-slate-950 text-slate-400 flex items-center justify-center">Carregando…</div>;
-
-  const P = data[activePerson];
+  const P = data ? data[activePerson] : null;
   const theme = THEMES[activePerson];
   const accent = theme.accent;
 
   const setPerfilSaude = (campo, val) => setData(d => ({...d, [activePerson]: {...d[activePerson], saude: {...d[activePerson].saude, perfil: {...d[activePerson].saude.perfil, [campo]: val}}}}));
-  const diaSaudeHoje = P.saude.dias[hoje()] || novoDiaSaude();
-  const setDiaSaude = (campo, val) => setData(d => {
-    const dias = {...d[activePerson].saude.dias, [hoje()]: {...(d[activePerson].saude.dias[hoje()]||novoDiaSaude()), [campo]: val}};
+  const diaSaudeAtual = P ? (P.saude.dias[diaSaude] || novoDiaSaude()) : novoDiaSaude();
+  const setDiaSaudeCampo = (campo, val) => setData(d => {
+    const dias = {...d[activePerson].saude.dias, [diaSaude]: {...(d[activePerson].saude.dias[diaSaude]||novoDiaSaude()), [campo]: val}};
     return {...d, [activePerson]: {...d[activePerson], saude: {...d[activePerson].saude, dias}}};
   });
   const setExamesSaude = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], saude: {...d[activePerson].saude, exames: val}}}));
 
   const setTarefas = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], tarefas: val}}));
   const setTrabalho = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], trabalho: val}}));
+  const setHabitos = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], habitos: typeof val === "function" ? val(d[activePerson].habitos) : val}}));
   const setEstudoTarefas = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], estudo: {...d[activePerson].estudo, itens: val.itens, dias: val.dias}}}));
   const setAulas = (val) => setData(d => ({...d, [activePerson]: {...d[activePerson], estudo: {...d[activePerson].estudo, aulas: val}}}));
 
@@ -997,15 +1284,17 @@ function TrindadeApp() {
   const setRelacionamento = (val) => setData(d => ({...d, relacionamento: val}));
   const setPets = (val) => setData(d => ({...d, pets: val}));
 
-  const totalExpenses = P.financeiro.expenses.reduce((s,e)=>s+n(e.amount),0);
-  const totalContributed = P.financeiro.investments.reduce((s,i)=>s+n(i.amount),0);
-  const totalInvested = P.financeiro.baseInvested + totalContributed;
+  const totalContributed = P ? P.financeiro.investments.reduce((s,i)=>s+n(i.amount),0) : 0;
+  const totalInvested = P ? P.financeiro.baseInvested + totalContributed : 0;
   const thisMonth = mesAtual();
-  const monthContrib = P.financeiro.investments.filter(i=>i.month===thisMonth).reduce((s,i)=>s+n(i.amount),0);
-  const byCategory = CAT_LIST.map(cat => ({cat, total: P.financeiro.expenses.filter(e=>e.category===cat).reduce((s,e)=>s+n(e.amount),0)})).filter(c=>c.total>0);
+  const monthContrib = P ? P.financeiro.investments.filter(i=>i.month===thisMonth).reduce((s,i)=>s+n(i.amount),0) : 0;
+  const expensesMes = P ? P.financeiro.expenses.filter(e => e.data && e.data.slice(0,7) === mesFin) : [];
+  const totalExpenses = expensesMes.reduce((s,e)=>s+n(e.amount),0);
+  const byCategory = CAT_LIST.map(cat => ({cat, total: expensesMes.filter(e=>e.category===cat).reduce((s,e)=>s+n(e.amount),0)})).filter(c=>c.total>0);
 
   /* -------- alertas: tarefas atrasadas, exames fora da faixa, meta financeira em risco -------- */
   const alertas = useMemo(() => {
+    if (!P) return [];
     const lista = [];
     const horaAtual = horaAgora(); const diaHoje = hoje();
     (P.tarefas.itens||[]).forEach(it => {
@@ -1022,12 +1311,14 @@ function TrindadeApp() {
   }, [P, monthContrib]);
 
   useEffect(() => {
-    if (!notifOn || alertas.length===0 || !("serviceWorker" in navigator)) return;
+    if (!P || !notifOn || alertas.length===0 || !("serviceWorker" in navigator)) return;
     navigator.serviceWorker.ready.then(reg => {
       reg.showNotification(`Trindade — ${theme.label}`, { body: alertas.slice(0,3).join("\n"), icon: "icon-192.png" });
     }).catch(()=>{});
     // eslint-disable-next-line
   }, [activePerson]);
+
+  if (loading || !data || !P) return <div className="min-h-screen bg-slate-950 text-slate-400 flex items-center justify-center">Carregando…</div>;
 
   const AREAS = [
     { k:"saude", l:"Saúde", icon: Ic.Health },
@@ -1035,19 +1326,14 @@ function TrindadeApp() {
     { k:"financeiro", l:"Financeiro", icon: Ic.Money },
     { k:"estudo", l:"Estudo", icon: Ic.Study },
     ...(P.trabalho ? [{ k:"trabalho", l:"Trabalho", icon: Ic.Work }] : []),
+    ...(P.habitos ? [{ k:"habitos", l:"Hábitos", icon: Ic.Check }] : []),
     { k:"casal", l:"Casal", icon: Ic.Heart },
     { k:"pet", l:"Pet", icon: Ic.Pet },
   ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-8">
+    <div className="min-h-screen bg-slate-950 text-slate-100" style={{paddingBottom:"calc(84px + env(safe-area-inset-bottom))"}}>
       <div className="px-4 pt-5 pb-3">
-        <div className="flex gap-2 mb-4">
-          {Object.entries(THEMES).map(([k,t]) => (
-            <button key={k} onClick={()=>setActivePerson(k)} className="flex-1 py-2 rounded-xl text-sm font-semibold transition"
-              style={activePerson===k ? {background:t.accent, color:"#020617"} : {background:"#1e293b", color:"#94a3b8"}}>{t.label}</button>
-          ))}
-        </div>
         <div className="flex items-center justify-between mb-1">
           <h1 className="text-xl font-bold" style={{fontFamily:"'Fraunces',serif"}}>Trindade</h1>
           <button onClick={pedirNotificacao} className="text-xs px-2 py-1 rounded-lg flex items-center gap-1" style={{background: notifOn ? "rgba(74,222,128,0.15)" : "#1e293b", color: notifOn ? "#4ade80" : "#94a3b8"}}>
@@ -1079,8 +1365,8 @@ function TrindadeApp() {
                 <button key={k} onClick={()=>setSubSaude(k)} className="flex-1 py-1.5 text-xs rounded-lg font-medium" style={subSaude===k?{background:"#1e293b",color:accent}:{background:"#0f172a",color:"#64748b"}}>{l}</button>
               ))}
             </div>
-            {subSaude==="hoje" && <SaudeHoje P={P.saude.perfil} D={diaSaudeHoje} setPerfilCampo={setPerfilSaude} setDiaCampo={setDiaSaude} accent={accent} />}
-            {subSaude==="historico" && <SaudeHistorico P={P.saude.perfil} accent={accent} />}
+            {subSaude==="hoje" && <SaudeHoje P={P.saude.perfil} D={diaSaudeAtual} dia={diaSaude} onDia={setDiaSaude_} setPerfilCampo={setPerfilSaude} setDiaCampo={setDiaSaudeCampo} accent={accent} />}
+            {subSaude==="historico" && <SaudeHistorico P={P.saude.perfil} dias={P.saude.dias} accent={accent} />}
             {subSaude==="exames" && <SaudeExames exames={P.saude.exames} setExames={setExamesSaude} accent={accent} />}
             {subSaude==="perfil" && <SaudePerfil P={P.saude.perfil} setPerfilCampo={setPerfilSaude} accent={accent} />}
           </>
@@ -1091,13 +1377,14 @@ function TrindadeApp() {
         {area==="financeiro" && (
           <>
             <div className="flex gap-1 mb-3">
-              {[["resumo","Resumo"],["gastos","Gastos"],["aportes","Aportes"],["projecoes","Projeções"]].map(([k,l]) => (
+              {[["resumo","Resumo"],["gastos","Gastos"],["aportes","Aportes"],["evolucao","Evolução"],["projecoes","Projeções"]].map(([k,l]) => (
                 <button key={k} onClick={()=>setSubFin(k)} className="flex-1 py-1.5 text-xs rounded-lg font-medium" style={subFin===k?{background:"#1e293b",color:accent}:{background:"#0f172a",color:"#64748b"}}>{l}</button>
               ))}
             </div>
-            {subFin==="resumo" && <FinResumo totalExpenses={totalExpenses} byCategory={byCategory} monthContrib={monthContrib} monthlyTarget={P.financeiro.monthlyTarget} accent={accent} />}
-            {subFin==="gastos" && <FinGastos expenses={P.financeiro.expenses} setExpenses={setExpenses} accent={accent} />}
+            {subFin==="resumo" && <FinResumo mes={mesFin} setMes={setMesFin} totalExpenses={totalExpenses} byCategory={byCategory} monthContrib={monthContrib} monthlyTarget={P.financeiro.monthlyTarget} isCurrentMonth={mesFin===thisMonth} accent={accent} />}
+            {subFin==="gastos" && <FinGastos expenses={P.financeiro.expenses} setExpenses={setExpenses} mes={mesFin} setMes={setMesFin} accent={accent} />}
             {subFin==="aportes" && <FinAportes investments={P.financeiro.investments} setInvestments={setInvestments} thisMonth={thisMonth} accent={accent} />}
+            {subFin==="evolucao" && <FinEvolucao expenses={P.financeiro.expenses} investments={P.financeiro.investments} accent={accent} />}
             {subFin==="projecoes" && <FinProjecoes investments={P.financeiro.investments} baseInvested={P.financeiro.baseInvested} totalInvested={totalInvested} monthlyTarget={P.financeiro.monthlyTarget} thisMonth={thisMonth} returnRate={P.financeiro.returnRate} setReturnRate={setReturnRate} accent={accent} specialsFn={activePerson==="pedro"?pedroSpecials:noSpecials} />}
             <div className="mt-3 bg-slate-900 border border-slate-800 rounded-xl p-3 flex justify-between items-center">
               <span className="text-xs text-slate-400">Base investida / meta mensal</span>
@@ -1123,17 +1410,76 @@ function TrindadeApp() {
 
         {area==="trabalho" && P.trabalho && <ChecklistDiario bucket={P.trabalho} setBucket={setTrabalho} accent={accent} corAtraso={false} />}
 
+        {area==="habitos" && P.habitos && <Habitos habitos={P.habitos} setHabitos={setHabitos} accent={accent} />}
+
         {area==="casal" && <DiarioCasal entradas={data.relacionamento} setEntradas={setRelacionamento} activePerson={activePerson} accent={accent} />}
 
         {area==="pet" && <AreaPet pets={data.pets} setPets={setPets} accent={accent} />}
+      </div>
+
+      <div
+        style={{
+          position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 50,
+          display: "flex", background: "rgba(2,6,23,0.92)", backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)", borderTop: "1px solid #1e293b",
+          paddingBottom: "env(safe-area-inset-bottom)",
+        }}
+      >
+        {Object.entries(THEMES).map(([k, t]) => {
+          const ativo = activePerson === k;
+          return (
+            <button
+              key={k}
+              onClick={() => setActivePerson(k)}
+              className="flex-1 flex flex-col items-center justify-center gap-0.5"
+              style={{ padding: "9px 0 7px", color: ativo ? t.accent : "#64748b" }}
+            >
+              <span
+                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold"
+                style={ativo ? { background: t.accent, color: "#020617" } : { background: "#1e293b", color: "#64748b" }}
+              >
+                {t.label[0]}
+              </span>
+              <span className="text-[11px] font-medium">{t.label}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-
-const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<TrindadeApp />);
 </script>
+<script>
+  function mostrarErro(titulo, err) {
+    var root = document.getElementById("root");
+    var msg = (err && (err.stack || err.message)) ? (err.stack || err.message) : String(err);
+    root.innerHTML =
+      '<div style="padding:20px;font-family:monospace;color:#fca5a5;background:#020617;min-height:100vh;">' +
+      '<div style="color:#f87171;font-weight:bold;margin-bottom:10px;font-size:14px;">' + titulo + '</div>' +
+      '<pre style="white-space:pre-wrap;font-size:11px;line-height:1.5;background:#111827;padding:12px;border-radius:8px;">' +
+      msg.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;") +
+      '</pre></div>';
+  }
+  window.addEventListener("error", function(e) {
+    if (!document.getElementById("root").innerHTML) {
+      var alvo = e.target && e.target.src ? "Falha ao carregar: " + e.target.src : "Erro de execução:";
+      mostrarErro(alvo, e.error || e.message || "recurso não carregou");
+    }
+  }, true);
+  window.addEventListener("unhandledrejection", function(e) {
+    if (!document.getElementById("root").innerHTML) mostrarErro("Erro (promise):", e.reason);
+  });
+  try {
+    var src = document.getElementById("app-code").textContent;
+    var output = Babel.transform(src, { presets: ["react"] }).code;
+    var script = document.createElement("script");
+    script.textContent = output + "\n\nconst root = ReactDOM.createRoot(document.getElementById('root')); root.render(React.createElement(TrindadeApp));";
+    document.body.appendChild(script);
+  } catch (err) {
+    mostrarErro("Erro ao processar o código (sintaxe):", err);
+  }
+</script>
+
 </body>
 </html>
