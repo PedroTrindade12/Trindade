@@ -627,6 +627,7 @@ const CAT_LIST = Object.keys(CATEGORIES);
 const MILESTONE_LIST = [300000,500000,1000000];
 function nextYM(y,m){ m+=1; if(m>12){m=1;y+=1;} return [y,m]; }
 function ymKey(y,m){ return `${y}-${String(m).padStart(2,"0")}`; }
+function shiftMonth(ym, delta){ let [y,m]=ym.split("-").map(Number); m+=delta; while(m<1){m+=12;y-=1;} while(m>12){m-=12;y+=1;} return ymKey(y,m); }
 function pedroSpecials(y,m){
   let extra=0; const notes=[];
   if (m===5 && y>=2027){ const plr=24000+(y-2027)*1000; extra+=plr; notes.push(`PLR ${fmtCompact(plr)}`); }
@@ -659,17 +660,27 @@ function EditableNumber({ value, display, onCommit, style, accent }) {
   return <div onClick={()=>{setDraft(value);setEditing(true);}} style={{...style, cursor:"pointer"}}>{display}</div>;
 }
 
-function FinResumo({ totalExpenses, byCategory, monthContrib, monthlyTarget, accent }) {
+function MesNav({ mes, setMes, accent }) {
+  return (
+    <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-3 py-2">
+      <button onClick={()=>setMes(shiftMonth(mes,-1))} className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center active:scale-95"><Ic.Left size={16}/></button>
+      <span className="text-sm font-medium" style={{fontFamily:"'Fraunces',serif", color:accent}}>{mesLabel(mes)}</span>
+      <button onClick={()=>setMes(shiftMonth(mes,1))} disabled={mes>=mesAtual()} className="w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center active:scale-95 disabled:opacity-30"><Ic.Right size={16}/></button>
+    </div>
+  );
+}
+function FinResumo({ mes, setMes, totalExpenses, byCategory, monthContrib, monthlyTarget, isCurrentMonth, accent }) {
   const maxCat = Math.max(1, ...byCategory.map(c=>c.total));
   const diaAtual = new Date().getDate();
   const diasNoMes = new Date(new Date().getFullYear(), new Date().getMonth()+1, 0).getDate();
   const ritmoEsperado = monthlyTarget * (diaAtual/diasNoMes);
-  const atrasado = monthlyTarget>0 && monthContrib < ritmoEsperado*0.85 && diaAtual > 5;
+  const atrasado = isCurrentMonth && monthlyTarget>0 && monthContrib < ritmoEsperado*0.85 && diaAtual > 5;
   return (
     <div className="space-y-4">
+      <MesNav mes={mes} setMes={setMes} accent={accent} />
       <Card>
         <Titulo icon={Ic.Money} accent={accent} extra={<span className="font-bold" style={{fontFamily:"'Fraunces',serif", fontSize:20}}>{fmt(totalExpenses)}</span>}>Gastos por categoria</Titulo>
-        {byCategory.length===0 && <p className="text-slate-500 text-sm">Nenhum gasto cadastrado.</p>}
+        {byCategory.length===0 && <p className="text-slate-500 text-sm">Nenhum gasto nesse mês.</p>}
         <div className="space-y-2.5">
           {byCategory.sort((a,b)=>b.total-a.total).map(c => (
             <div key={c.cat}>
@@ -679,41 +690,63 @@ function FinResumo({ totalExpenses, byCategory, monthContrib, monthlyTarget, acc
           ))}
         </div>
       </Card>
-      <Card className={atrasado ? "border-red-500/50" : ""}>
-        <Titulo icon={Ic.Target} accent={accent}>Meta de investimento do mês</Titulo>
-        {monthlyTarget<=0 ? <p className="text-slate-500 text-sm">Defina uma meta na aba Aportes.</p> : (
-          <>
+      {isCurrentMonth && (
+        <Card className={atrasado ? "border-red-500/50" : ""}>
+          <Titulo icon={Ic.Target} accent={accent}>Meta de investimento do mês</Titulo>
+          {monthlyTarget<=0 ? <p className="text-slate-500 text-sm">Defina uma meta na aba Aportes.</p> : (
             <div className={`text-sm ${atrasado?"text-red-400":"text-slate-300"}`}>
               {monthContrib >= monthlyTarget ? "Meta do mês batida ✓" : atrasado ? `Fora do ritmo — já deveria ter ~${fmt(ritmoEsperado)}, tem ${fmt(monthContrib)}.` : `Faltam ${fmt(monthlyTarget-monthContrib)} pra bater a meta.`}
             </div>
-          </>
-        )}
-      </Card>
+          )}
+        </Card>
+      )}
     </div>
   );
 }
-function FinGastos({ expenses, setExpenses, accent }) {
-  const [desc,setDesc]=useState(""); const [category,setCategory]=useState(CAT_LIST[0]); const [amount,setAmount]=useState("");
-  const total = expenses.reduce((s,e)=>s+n(e.amount),0);
-  const add = () => { if(!desc.trim()||!amount) return; setExpenses([...expenses,{id:uid(),desc:desc.trim(),category,amount:n(amount)}]); setDesc("");setAmount(""); };
+function FinGastos({ expenses, setExpenses, mes, setMes, accent }) {
+  const [desc,setDesc]=useState(""); const [category,setCategory]=useState(CAT_LIST[0]); const [amount,setAmount]=useState(""); const [data,setDataCampo]=useState(hoje());
+  const semData = expenses.filter(e => !e.data);
+  const doMes = expenses.filter(e => e.data && e.data.slice(0,7)===mes).sort((a,b)=> b.data.localeCompare(a.data));
+  const total = doMes.reduce((s,e)=>s+n(e.amount),0);
+  const add = () => { if(!desc.trim()||!amount) return; setExpenses([...expenses,{id:uid(),desc:desc.trim(),category,amount:n(amount),data}]); setDesc("");setAmount(""); };
   const remove = (id) => setExpenses(expenses.filter(e=>e.id!==id));
+  const setDataDe = (id, novaData) => setExpenses(expenses.map(e => e.id===id ? {...e, data: novaData} : e));
   return (
     <div className="space-y-4">
+      {semData.length>0 && (
+        <Card className="border-amber-500/40">
+          <Titulo icon={Ic.Warn} accent="#f59e0b">Gastos antigos sem data ({semData.length})</Titulo>
+          <p className="text-xs text-slate-400 mb-2">Esses foram lançados antes de existir o campo de data — defina a data real de cada um pra eles entrarem no mês certo.</p>
+          <div className="space-y-1.5">
+            {semData.map(e => (
+              <div key={e.id} className="flex items-center justify-between bg-slate-800/50 rounded-lg px-3 py-2 gap-2">
+                <div className="min-w-0 flex-1"><div className="text-sm truncate">{e.desc}</div><div className="text-[10px] text-slate-500">{e.category} · {fmt(e.amount)}</div></div>
+                <input type="date" onChange={(ev)=>setDataDe(e.id, ev.target.value)} className="bg-slate-800 rounded-lg px-2 py-1.5 text-xs outline-none shrink-0" style={{colorScheme:"dark"}} />
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+      <MesNav mes={mes} setMes={setMes} accent={accent} />
       <Card>
         <input value={desc} onChange={(e)=>setDesc(e.target.value)} placeholder="descrição do gasto" className="w-full bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none mb-2" />
-        <div className="flex gap-2">
+        <div className="flex gap-2 mb-2">
+          <input type="date" value={data} onChange={(e)=>setDataCampo(e.target.value)} className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
           <select value={category} onChange={(e)=>setCategory(e.target.value)} className="flex-1 bg-slate-800 rounded-lg px-2 py-2 text-xs outline-none">{CAT_LIST.map(c=><option key={c} value={c}>{c}</option>)}</select>
-          <input value={amount} onChange={(e)=>setAmount(e.target.value)} type="number" placeholder="R$" className="w-24 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
+        </div>
+        <div className="flex gap-2">
+          <input value={amount} onChange={(e)=>setAmount(e.target.value)} type="number" placeholder="R$" className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-sm outline-none" />
           <button onClick={add} className="rounded-lg px-3 text-sm font-semibold" style={{background:accent,color:"#020617"}}><Ic.Plus size={16}/></button>
         </div>
       </Card>
-      {expenses.map(e => (
+      {doMes.length===0 && <p className="text-slate-500 text-sm text-center py-4">Nenhum gasto nesse mês.</p>}
+      {doMes.map(e => (
         <div key={e.id} className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5">
-          <div className="flex items-center gap-2 min-w-0"><span className="w-2 h-2 rounded-full shrink-0" style={{background:CATEGORIES[e.category]}} /><div className="min-w-0"><div className="text-sm truncate">{e.desc}</div><div className="text-[10px] text-slate-500">{e.category}</div></div></div>
+          <div className="flex items-center gap-2 min-w-0"><span className="w-2 h-2 rounded-full shrink-0" style={{background:CATEGORIES[e.category]}} /><div className="min-w-0"><div className="text-sm truncate">{e.desc}</div><div className="text-[10px] text-slate-500">{e.category} · {curto(e.data)}</div></div></div>
           <div className="flex items-center gap-2 shrink-0"><span className="text-sm text-slate-300">{fmt(e.amount)}</span><button onClick={()=>remove(e.id)} className="text-slate-600"><Ic.Trash size={14}/></button></div>
         </div>
       ))}
-      <div className="flex justify-between pt-2 border-t border-slate-800"><span className="text-xs text-slate-400 uppercase">Total</span><span className="font-bold" style={{fontFamily:"'Fraunces',serif"}}>{fmt(total)}</span></div>
+      <div className="flex justify-between pt-2 border-t border-slate-800"><span className="text-xs text-slate-400 uppercase">Total do mês</span><span className="font-bold" style={{fontFamily:"'Fraunces',serif"}}>{fmt(total)}</span></div>
     </div>
   );
 }
@@ -781,6 +814,83 @@ function FinProjecoes({ investments, baseInvested, totalInvested, monthlyTarget,
           })}
         </div>
       </Card>
+    </div>
+  );
+}
+function FinEvolucao({ expenses, investments, baseInvested, accent }) {
+  const gastosPorMes = {};
+  let semData = 0;
+  expenses.forEach(e => { if (!e.data) { semData += n(e.amount); return; } const mo = e.data.slice(0,7); gastosPorMes[mo] = (gastosPorMes[mo]||0) + n(e.amount); });
+  const aportesPorMes = {};
+  investments.forEach(i => { aportesPorMes[i.month] = (aportesPorMes[i.month]||0) + n(i.amount); });
+  const meses = Array.from(new Set([...Object.keys(gastosPorMes), ...Object.keys(aportesPorMes)])).sort();
+  const mesesRecentes = meses.slice(-12);
+
+  // total investido acumulado (base + aportes até aquele mês, em ordem cronológica)
+  let acumulado = baseInvested;
+  const totalPorMes = {};
+  meses.forEach(mo => { acumulado += (aportesPorMes[mo]||0); totalPorMes[mo] = acumulado; });
+
+  const chartInvest = mesesRecentes.map(mo => ({ month: mesLabel(mo), total: totalPorMes[mo] }));
+  const chartGastos = mesesRecentes.map(mo => ({ month: mesLabel(mo), gastos: gastosPorMes[mo]||0 }));
+  const mediaGastos = mesesRecentes.length ? mesesRecentes.reduce((s,mo)=>s+(gastosPorMes[mo]||0),0)/mesesRecentes.length : 0;
+  const mediaAportes = mesesRecentes.length ? mesesRecentes.reduce((s,mo)=>s+(aportesPorMes[mo]||0),0)/mesesRecentes.length : 0;
+  const totalAtual = meses.length ? totalPorMes[meses[meses.length-1]] : baseInvested;
+  const yMaxInvest = Math.max(baseInvested*1.05, ...chartInvest.map(c=>c.total), 1);
+
+  return (
+    <div className="space-y-4">
+      {semData>0 && (
+        <Card className="border-amber-500/40">
+          <div className="text-xs text-amber-400 flex items-start gap-1.5"><Ic.Warn size={12} className="shrink-0 mt-0.5"/>{fmt(semData)} em gastos sem data ainda não entram nesse gráfico — ajuste a data deles na aba Gastos.</div>
+        </Card>
+      )}
+      <Card>
+        <Titulo icon={Ic.Target} accent={accent} extra={<span className="font-bold" style={{fontFamily:"'Fraunces',serif", fontSize:18, color:"#4ade80"}}>{fmt(totalAtual)}</span>}>Total investido</Titulo>
+        {chartInvest.length===0 ? <p className="text-slate-500 text-sm">Sem aportes lançados ainda.</p> : (
+          <div className="h-56"><ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartInvest} margin={{top:6,right:8,left:-16,bottom:0}}>
+              <CartesianGrid stroke="#1e293b" vertical={false} />
+              <XAxis dataKey="month" tick={{fontSize:9,fill:"#64748b"}} />
+              <YAxis tickFormatter={fmtCompact} tick={{fontSize:9,fill:"#64748b"}} domain={[0,yMaxInvest]} width={40} />
+              <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:11}} formatter={(v)=>[fmt(v), "total investido"]} />
+              <ReferenceLine y={baseInvested} stroke="#f59e0b" strokeDasharray="4 3" label={{value:"base", position:"insideTopLeft", fontSize:9, fill:"#f59e0b"}} />
+              <Bar dataKey="total" fill="#4ade80" radius={[4,4,0,0]} />
+            </BarChart>
+          </ResponsiveContainer></div>
+        )}
+        <div className="text-[11px] text-slate-500 mt-2">Base investida: <span className="text-amber-400">{fmt(baseInvested)}</span> · cada barra é o total acumulado (base + aportes) até o fim daquele mês.</div>
+      </Card>
+      <Card>
+        <Titulo icon={Ic.Money} accent={accent}>Gastos por mês</Titulo>
+        {chartGastos.length===0 ? <p className="text-slate-500 text-sm">Sem gastos lançados ainda.</p> : (
+          <div className="h-48"><ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartGastos} margin={{top:6,right:8,left:-16,bottom:0}}>
+              <CartesianGrid stroke="#1e293b" vertical={false} />
+              <XAxis dataKey="month" tick={{fontSize:9,fill:"#64748b"}} />
+              <YAxis tickFormatter={fmtCompact} tick={{fontSize:9,fill:"#64748b"}} width={40} />
+              <Tooltip contentStyle={{background:"#0f172a",border:"1px solid #1e293b",borderRadius:8,fontSize:11}} formatter={(v)=>[fmt(v), "gastos"]} />
+              <Bar dataKey="gastos" fill="#B5657A" radius={[4,4,0,0]} />
+            </BarChart>
+          </ResponsiveContainer></div>
+        )}
+      </Card>
+      <Card>
+        <Titulo icon={Ic.Chart} accent={accent}>Médias (últimos {mesesRecentes.length} meses)</Titulo>
+        <div className="flex justify-between text-sm py-1"><span className="text-slate-400">Gastos/mês</span><span className="font-semibold">{fmt(mediaGastos)}</span></div>
+        <div className="flex justify-between text-sm py-1"><span className="text-slate-400">Aportes/mês</span><span className="font-semibold text-emerald-400">{fmt(mediaAportes)}</span></div>
+      </Card>
+      <div className="space-y-2">
+        {mesesRecentes.slice().reverse().map(mo => (
+          <div key={mo} className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5">
+            <span className="text-sm">{mesLabel(mo)}</span>
+            <div className="flex gap-3 text-xs">
+              <span style={{color:"#B5657A"}}>-{fmt(gastosPorMes[mo]||0)}</span>
+              <span className="text-emerald-400">total {fmt(totalPorMes[mo])}</span>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1114,6 +1224,7 @@ function TrindadeApp() {
   const [subSaude, setSubSaude] = useState("hoje");
   const [diaSaude, setDiaSaude_] = useState(hoje());
   const [subFin, setSubFin] = useState("resumo");
+  const [mesFin, setMesFin] = useState(mesAtual());
   const [subEstudo, setSubEstudo] = useState("tarefas");
   const [loading, setLoading] = useState(true);
   const [notifOn, setNotifOn] = useState(false);
@@ -1195,12 +1306,13 @@ function TrindadeApp() {
   const setRelacionamento = (val) => setData(d => ({...d, relacionamento: val}));
   const setPets = (val) => setData(d => ({...d, pets: val}));
 
-  const totalExpenses = P ? P.financeiro.expenses.reduce((s,e)=>s+n(e.amount),0) : 0;
   const totalContributed = P ? P.financeiro.investments.reduce((s,i)=>s+n(i.amount),0) : 0;
   const totalInvested = P ? P.financeiro.baseInvested + totalContributed : 0;
   const thisMonth = mesAtual();
   const monthContrib = P ? P.financeiro.investments.filter(i=>i.month===thisMonth).reduce((s,i)=>s+n(i.amount),0) : 0;
-  const byCategory = P ? CAT_LIST.map(cat => ({cat, total: P.financeiro.expenses.filter(e=>e.category===cat).reduce((s,e)=>s+n(e.amount),0)})).filter(c=>c.total>0) : [];
+  const expensesMes = P ? P.financeiro.expenses.filter(e => e.data && e.data.slice(0,7) === mesFin) : [];
+  const totalExpenses = expensesMes.reduce((s,e)=>s+n(e.amount),0);
+  const byCategory = CAT_LIST.map(cat => ({cat, total: expensesMes.filter(e=>e.category===cat).reduce((s,e)=>s+n(e.amount),0)})).filter(c=>c.total>0);
 
   /* -------- alertas: tarefas atrasadas, exames fora da faixa, meta financeira em risco -------- */
   const alertas = useMemo(() => {
@@ -1287,13 +1399,14 @@ function TrindadeApp() {
         {area==="financeiro" && (
           <>
             <div className="flex gap-1 mb-3">
-              {[["resumo","Resumo"],["gastos","Gastos"],["aportes","Aportes"],["projecoes","Projeções"]].map(([k,l]) => (
+              {[["resumo","Resumo"],["gastos","Gastos"],["aportes","Aportes"],["evolucao","Evolução"],["projecoes","Projeções"]].map(([k,l]) => (
                 <button key={k} onClick={()=>setSubFin(k)} className="flex-1 py-1.5 text-xs rounded-lg font-medium" style={subFin===k?{background:"#1e293b",color:accent}:{background:"#0f172a",color:"#64748b"}}>{l}</button>
               ))}
             </div>
-            {subFin==="resumo" && <FinResumo totalExpenses={totalExpenses} byCategory={byCategory} monthContrib={monthContrib} monthlyTarget={P.financeiro.monthlyTarget} accent={accent} />}
-            {subFin==="gastos" && <FinGastos expenses={P.financeiro.expenses} setExpenses={setExpenses} accent={accent} />}
+            {subFin==="resumo" && <FinResumo mes={mesFin} setMes={setMesFin} totalExpenses={totalExpenses} byCategory={byCategory} monthContrib={monthContrib} monthlyTarget={P.financeiro.monthlyTarget} isCurrentMonth={mesFin===thisMonth} accent={accent} />}
+            {subFin==="gastos" && <FinGastos expenses={P.financeiro.expenses} setExpenses={setExpenses} mes={mesFin} setMes={setMesFin} accent={accent} />}
             {subFin==="aportes" && <FinAportes investments={P.financeiro.investments} setInvestments={setInvestments} thisMonth={thisMonth} accent={accent} />}
+            {subFin==="evolucao" && <FinEvolucao expenses={P.financeiro.expenses} investments={P.financeiro.investments} baseInvested={P.financeiro.baseInvested} accent={accent} />}
             {subFin==="projecoes" && <FinProjecoes investments={P.financeiro.investments} baseInvested={P.financeiro.baseInvested} totalInvested={totalInvested} monthlyTarget={P.financeiro.monthlyTarget} thisMonth={thisMonth} returnRate={P.financeiro.returnRate} setReturnRate={setReturnRate} accent={accent} specialsFn={activePerson==="pedro"?pedroSpecials:noSpecials} />}
             <div className="mt-3 bg-slate-900 border border-slate-800 rounded-xl p-3 flex justify-between items-center">
               <span className="text-xs text-slate-400">Base investida / meta mensal</span>
